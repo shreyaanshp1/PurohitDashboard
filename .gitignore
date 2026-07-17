@@ -1,0 +1,16 @@
+.DS_Store
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+.env
+.env.example
+.env.local
+.env.*.local
+.supabase*.env
+secrets/
+uploads/
+
+# Leftover local Ruby install artifacts from the abandoned Rails spike.
+.bundle/
+vendor/bundle/

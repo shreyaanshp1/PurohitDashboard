@@ -1,0 +1,2 @@
+[functions.travel-master-data]
+verify_jwt = false
