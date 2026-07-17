@@ -53,9 +53,31 @@ async function listTravelMasterData() {
   const headerRowNumber = getMasterDataHeaderRowNumber();
   const sheetNames = getMasterDataSheetNames();
   const accessToken = await getGoogleAccessToken();
-  const sheets = await Promise.all(
-    sheetNames.map((sheetName) => readMasterDataSheet({ accessToken, spreadsheetId, sheetName, headerRowNumber }))
+  const sheetResults = await Promise.all(
+    sheetNames.map(async (sheetName) => {
+      try {
+        return {
+          error: null,
+          sheet: await readMasterDataSheet({ accessToken, spreadsheetId, sheetName, headerRowNumber })
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not load sheet.";
+        console.warn(`[travel-master-data:${sheetName}]`, message);
+
+        return {
+          error: { message, sheetName },
+          sheet: null
+        };
+      }
+    })
   );
+  const sheets = [];
+  const errors = [];
+
+  for (const result of sheetResults) {
+    if (result.sheet) sheets.push(result.sheet);
+    if (result.error) errors.push(result.error);
+  }
 
   return {
     success: true,
@@ -63,6 +85,7 @@ async function listTravelMasterData() {
     readOnly: true,
     spreadsheetId,
     headerRowNumber,
+    errors,
     sheets
   };
 }
