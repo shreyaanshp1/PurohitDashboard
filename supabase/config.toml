@@ -1,2 +1,5 @@
+[functions.travel-sheets]
+verify_jwt = false
+
 [functions.travel-master-data]
 verify_jwt = false

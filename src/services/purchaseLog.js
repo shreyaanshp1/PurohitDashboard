@@ -2,6 +2,7 @@ const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.
 
 const PURCHASE_ENDPOINT = env.VITE_PURCHASE_LOG_ENDPOINT || "/api/purchases";
 const API_ROOT = PURCHASE_ENDPOINT.replace(/\/purchases\/?$/, "") || "/api";
+const TRAVEL_SHEETS_ENDPOINT = trimTrailingSlash(env.VITE_TRAVEL_SHEETS_ENDPOINT || "");
 const TRAVEL_MASTER_DATA_ENDPOINT = env.VITE_TRAVEL_MASTER_DATA_ENDPOINT || "";
 
 export async function appendPurchase(purchase) {
@@ -74,6 +75,10 @@ export async function clearUsMintOrders() {
 }
 
 export async function listTravelSheets() {
+  if (TRAVEL_SHEETS_ENDPOINT) {
+    return requestJson(TRAVEL_SHEETS_ENDPOINT);
+  }
+
   return requestJson(`${API_ROOT}/travel/sheets`);
 }
 
@@ -86,6 +91,10 @@ export async function listTravelMasterData() {
 }
 
 export async function appendTravelSheetRow({ sheetName, values }) {
+  if (TRAVEL_SHEETS_ENDPOINT) {
+    return postJson(`${TRAVEL_SHEETS_ENDPOINT}/${encodeURIComponent(sheetName)}/rows`, { values });
+  }
+
   return postJson(`${API_ROOT}/travel/sheets/${encodeURIComponent(sheetName)}/rows`, { values });
 }
 
@@ -121,6 +130,10 @@ function parseJsonResponse(text, response) {
     const detail = isHtml ? "HTML" : "a non-JSON response";
     throw new Error(`API returned ${detail} for ${response.url}. Check the deployed API endpoint configuration.`);
   }
+}
+
+function trimTrailingSlash(value) {
+  return String(value || "").trim().replace(/\/$/, "");
 }
 
 function readFileAsDataUrl(file) {

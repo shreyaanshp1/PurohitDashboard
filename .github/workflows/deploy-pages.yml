@@ -34,6 +34,7 @@ jobs:
       - name: Build
         env:
           GITHUB_PAGES_BASE: /${{ github.event.repository.name }}/
+          VITE_TRAVEL_SHEETS_ENDPOINT: ${{ vars.VITE_TRAVEL_SHEETS_ENDPOINT }}
           VITE_TRAVEL_MASTER_DATA_ENDPOINT: ${{ vars.VITE_TRAVEL_MASTER_DATA_ENDPOINT }}
         run: npm run build
 
