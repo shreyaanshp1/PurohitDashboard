@@ -228,7 +228,17 @@ function base64urlBytes(value) {
 
 async function parseGoogleResponse(response) {
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  let data: any = {};
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      const isHtml = /<!doctype html|<html[\s>]/i.test(text);
+      const detail = isHtml ? "HTML" : "a non-JSON response";
+      throw new Error(`Google returned ${detail} with status ${response.status}. Check the spreadsheet ID secret and service-account sharing.`);
+    }
+  }
 
   if (!response.ok) {
     throw new Error(data.error?.message || data.error_description || data.error || `Google request failed with status ${response.status}.`);
@@ -240,6 +250,18 @@ async function parseGoogleResponse(response) {
 function getMasterDataSpreadsheetId() {
   const spreadsheetId = Deno.env.get("TRAVEL_MASTER_DATA_SPREADSHEET_ID");
   if (!spreadsheetId) throw new Error("Missing TRAVEL_MASTER_DATA_SPREADSHEET_ID.");
+  return normalizeSpreadsheetId(spreadsheetId, "TRAVEL_MASTER_DATA_SPREADSHEET_ID");
+}
+
+function normalizeSpreadsheetId(value, secretName) {
+  const trimmed = String(value || "").trim();
+  const urlMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const spreadsheetId = (urlMatch?.[1] || trimmed.split(/[?#]/)[0]).replace(/\/+$/, "");
+
+  if (!/^[a-zA-Z0-9-_]+$/.test(spreadsheetId)) {
+    throw new Error(`${secretName} must be a Google Sheets spreadsheet ID or share URL.`);
+  }
+
   return spreadsheetId;
 }
 
