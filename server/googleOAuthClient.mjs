@@ -22,7 +22,7 @@ export async function getGoogleOAuthStatus() {
   };
 }
 
-export function getGoogleAuthUrl() {
+export function getGoogleAuthUrl({ state = "" } = {}) {
   const { clientId, redirectUri } = requiredGoogleOAuthConfig();
   const params = new URLSearchParams({
     access_type: "offline",
@@ -33,6 +33,10 @@ export function getGoogleAuthUrl() {
     response_type: "code",
     scope: GMAIL_READONLY_SCOPE
   });
+
+  if (state) {
+    params.set("state", state);
+  }
 
   return {
     success: true,

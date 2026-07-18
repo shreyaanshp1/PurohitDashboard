@@ -58,9 +58,16 @@ export async function getGoogleOAuthStatus() {
   return requestJson(`${API_ROOT}/google/oauth/status`);
 }
 
-export async function getGoogleOAuthUrl() {
+export async function getGoogleOAuthUrl({ returnUrl = "" } = {}) {
   requirePurchaseBackend("Google OAuth");
-  return requestJson(`${API_ROOT}/google/oauth/url`);
+
+  const params = new URLSearchParams();
+
+  if (returnUrl) {
+    params.set("returnUrl", returnUrl);
+  }
+
+  return requestJson(`${API_ROOT}/google/oauth/url${params.size ? `?${params}` : ""}`);
 }
 
 export async function listCostcoOrders({ limit = 500 } = {}) {

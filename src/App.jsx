@@ -137,6 +137,108 @@ const fallbackTravelSheets = travelSheetNames.map((name) => ({
   rowCount: 0
 }));
 const usMintTabs = ["Accounts", "Email Orders", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales"];
+const googleOAuthMessageType = "google-oauth-complete";
+const googleOAuthPopupFeatures = "popup=yes,width=520,height=720,left=160,top=80";
+const googleOAuthWaitMs = 120000;
+
+async function connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus }) {
+  let oauthWindow = null;
+
+  try {
+    oauthWindow = openGoogleOAuthWindow();
+    const result = await getGoogleOAuthUrl({ returnUrl: window.location.href });
+
+    if (!result.authUrl) {
+      throw new Error("Google OAuth URL was not returned.");
+    }
+
+    if (!oauthWindow || oauthWindow.closed) {
+      window.location.assign(result.authUrl);
+      return null;
+    }
+
+    oauthWindow.location.href = result.authUrl;
+    notifySuccess("Google OAuth opened.");
+
+    const completion = await waitForGoogleOAuthCompletion(oauthWindow);
+    const latestStatus = await getGoogleOAuthStatus();
+    setGoogleStatus(latestStatus);
+
+    if (latestStatus.authenticated) {
+      notifySuccess("Gmail connected.");
+      return latestStatus;
+    }
+
+    notifyError(
+      "Google OAuth was not completed.",
+      completion?.error || "Close any stale Google OAuth tabs and try again."
+    );
+    return latestStatus;
+  } catch (error) {
+    if (oauthWindow && !oauthWindow.closed) {
+      oauthWindow.close();
+    }
+
+    console.error("Failed to open Google OAuth", error);
+    notifyError("Could not open Google OAuth.", error.message);
+    return null;
+  }
+}
+
+function openGoogleOAuthWindow() {
+  const popup = window.open("", "google-oauth", googleOAuthPopupFeatures);
+
+  if (!popup) {
+    return null;
+  }
+
+  try {
+    popup.document.title = "Connecting Gmail";
+    popup.document.body.innerHTML = `
+      <main style="font-family: system-ui, sans-serif; padding: 24px;">
+        <h1 style="font-size: 20px; margin: 0 0 8px;">Connecting Gmail</h1>
+        <p style="color: #475569; line-height: 1.5; margin: 0;">Waiting for Google OAuth...</p>
+      </main>
+    `;
+    popup.focus();
+  } catch {
+    // The popup is navigated immediately after the OAuth URL returns.
+  }
+
+  return popup;
+}
+
+function waitForGoogleOAuthCompletion(oauthWindow) {
+  return new Promise((resolve) => {
+    let isSettled = false;
+
+    const finish = (result) => {
+      if (isSettled) return;
+      isSettled = true;
+      window.removeEventListener("message", handleMessage);
+      window.clearInterval(pollId);
+      window.clearTimeout(timeoutId);
+      resolve(result);
+    };
+
+    const handleMessage = (event) => {
+      if (event.data?.type !== googleOAuthMessageType) return;
+      finish(event.data);
+    };
+
+    const pollId = window.setInterval(() => {
+      if (oauthWindow.closed) {
+        finish({ error: "The Google OAuth tab closed before Gmail connected.", success: false });
+      }
+    }, 600);
+
+    const timeoutId = window.setTimeout(() => {
+      finish({ error: "Timed out waiting for Google OAuth to finish.", success: false });
+    }, googleOAuthWaitMs);
+
+    window.addEventListener("message", handleMessage);
+  });
+}
 
 function App() {
   const [activePage, setActivePage] = useState("home");
@@ -304,17 +406,28 @@ function CostcoPage({ query }) {
     async function loadCostcoData() {
       setIsLoading(true);
 
-      try {
-        const [statusResult, ordersResult] = await Promise.all([getGoogleOAuthStatus(), listCostcoOrders({ limit: 1000 })]);
-        if (!isCurrent) return;
-        setGoogleStatus(statusResult);
-        setOrders(ordersResult.orders || []);
-      } catch (error) {
-        console.error("Failed to load Costco data", error);
-        if (isCurrent) notifyError("Could not load Costco data.", error.message);
-      } finally {
-        if (isCurrent) setIsLoading(false);
+      const [statusResult, ordersResult] = await Promise.allSettled([
+        getGoogleOAuthStatus(),
+        listCostcoOrders({ limit: 1000 })
+      ]);
+
+      if (!isCurrent) return;
+
+      if (statusResult.status === "fulfilled") {
+        setGoogleStatus(statusResult.value);
+      } else {
+        console.error("Failed to load Google OAuth status", statusResult.reason);
+        notifyError("Could not load Google OAuth status.", statusResult.reason.message);
       }
+
+      if (ordersResult.status === "fulfilled") {
+        setOrders(ordersResult.value.orders || []);
+      } else {
+        console.error("Failed to load Costco data", ordersResult.reason);
+        notifyError("Could not load Costco order rows.", ordersResult.reason.message);
+      }
+
+      setIsLoading(false);
     }
 
     loadCostcoData();
@@ -368,23 +481,16 @@ function CostcoPage({ query }) {
         : "OAuth missing";
 
   async function handleConnectGmail() {
-    try {
-      const result = await getGoogleOAuthUrl();
-      window.open(result.authUrl, "_blank", "noopener,noreferrer");
-      notifySuccess("Google OAuth opened.");
-    } catch (error) {
-      console.error("Failed to open Google OAuth", error);
-      notifyError("Could not open Google OAuth.", error.message);
-    }
+    return connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus });
   }
 
   async function handleImportOrders({ allHistory = false } = {}) {
-    const latestStatus = await getGoogleOAuthStatus();
+    let latestStatus = await getGoogleOAuthStatus();
     setGoogleStatus(latestStatus);
 
     if (!latestStatus.authenticated) {
-      await handleConnectGmail();
-      return;
+      latestStatus = await handleConnectGmail();
+      if (!latestStatus?.authenticated) return;
     }
 
     const setWorking = allHistory ? setIsImportingHistory : setIsImporting;
@@ -1084,17 +1190,28 @@ function UsMintPage({ query }) {
     async function loadUsMintData() {
       setIsLoading(true);
 
-      try {
-        const [statusResult, ordersResult] = await Promise.all([getGoogleOAuthStatus(), listUsMintOrders({ limit: 1000 })]);
-        if (!isCurrent) return;
-        setGoogleStatus(statusResult);
-        setOrders(ordersResult.orders || []);
-      } catch (error) {
-        console.error("Failed to load US Mint data", error);
-        if (isCurrent) notifyError("Could not load US Mint data.", error.message);
-      } finally {
-        if (isCurrent) setIsLoading(false);
+      const [statusResult, ordersResult] = await Promise.allSettled([
+        getGoogleOAuthStatus(),
+        listUsMintOrders({ limit: 1000 })
+      ]);
+
+      if (!isCurrent) return;
+
+      if (statusResult.status === "fulfilled") {
+        setGoogleStatus(statusResult.value);
+      } else {
+        console.error("Failed to load Google OAuth status", statusResult.reason);
+        notifyError("Could not load Google OAuth status.", statusResult.reason.message);
       }
+
+      if (ordersResult.status === "fulfilled") {
+        setOrders(ordersResult.value.orders || []);
+      } else {
+        console.error("Failed to load US Mint data", ordersResult.reason);
+        notifyError("Could not load US Mint order rows.", ordersResult.reason.message);
+      }
+
+      setIsLoading(false);
     }
 
     loadUsMintData();
@@ -1135,23 +1252,16 @@ function UsMintPage({ query }) {
   ];
 
   async function handleConnectGmail() {
-    try {
-      const result = await getGoogleOAuthUrl();
-      window.open(result.authUrl, "_blank", "noopener,noreferrer");
-      notifySuccess("Google OAuth opened.");
-    } catch (error) {
-      console.error("Failed to open Google OAuth", error);
-      notifyError("Could not open Google OAuth.", error.message);
-    }
+    return connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus });
   }
 
   async function handleImportOrders({ allHistory = false } = {}) {
-    const latestStatus = await getGoogleOAuthStatus();
+    let latestStatus = await getGoogleOAuthStatus();
     setGoogleStatus(latestStatus);
 
     if (!latestStatus.authenticated) {
-      await handleConnectGmail();
-      return;
+      latestStatus = await handleConnectGmail();
+      if (!latestStatus?.authenticated) return;
     }
 
     const setWorking = allHistory ? setIsImportingHistory : setIsImporting;
