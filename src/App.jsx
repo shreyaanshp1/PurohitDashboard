@@ -73,6 +73,11 @@ import {
   listReceiptFolders,
   listReceipts
 } from "./services/purchaseLog.js";
+import {
+  clearAuthSession,
+  readAuthSession,
+  signInWithSupabase
+} from "./services/auth.js";
 
 const iconMap = {
   home: Home,
@@ -243,8 +248,85 @@ function waitForGoogleOAuthCompletion(oauthWindow) {
 function App() {
   const [activePage, setActivePage] = useState("home");
   const [query, setQuery] = useState("");
+  const [session, setSession] = useState(readAuthSession());
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [loginForm, setLoginForm] = useState({ username: "", password: "", otp: "" });
+  const { notifyError, notifySuccess } = useToast();
 
   const pageTitle = navItems.find((item) => item.id === activePage)?.label || "Home";
+
+  useEffect(() => {
+    const storedSession = readAuthSession();
+    if (storedSession) {
+      setSession(storedSession);
+    }
+  }, []);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setIsAuthenticating(true);
+    setAuthError("");
+
+    try {
+      const result = await signInWithSupabase({
+        username: loginForm.username,
+        password: loginForm.password,
+        otp: loginForm.otp
+      });
+      setSession(result);
+      notifySuccess(`Welcome back, ${result.name}.`);
+    } catch (error) {
+      setAuthError(error.message);
+      notifyError("Sign-in failed.", error.message);
+    } finally {
+      setIsAuthenticating(false);
+    }
+  }
+
+  function handleLogout() {
+    clearAuthSession();
+    setSession(null);
+    setLoginForm({ username: "", password: "", otp: "" });
+    setAuthError("");
+  }
+
+  if (!session) {
+    return (
+      <div className="auth-page">
+        <form className="auth-card" onSubmit={handleSubmit}>
+          <div className="auth-card__header">
+            <p className="eyebrow">Secure access</p>
+            <h2>Sign in</h2>
+            <p>Use your Supabase-backed account or the demo account to access the command center.</p>
+          </div>
+
+          <label className="auth-field">
+            <span>Username</span>
+            <input onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} placeholder="demo" type="text" value={loginForm.username} />
+          </label>
+
+          <label className="auth-field">
+            <span>Password</span>
+            <input onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="demo" type="password" value={loginForm.password} />
+          </label>
+
+          <label className="auth-field">
+            <span>2FA code (optional for demo)</span>
+            <input onChange={(event) => setLoginForm((current) => ({ ...current, otp: event.target.value }))} placeholder="123456" type="text" value={loginForm.otp} />
+          </label>
+
+          {authError ? <p className="auth-error">{authError}</p> : null}
+
+          <button className="purchase-submit auth-submit" disabled={isAuthenticating} type="submit">
+            {isAuthenticating ? "Signing in..." : "Log in"}
+          </button>
+
+          <p className="auth-hint">Demo credentials: demo / demo · 2FA code is optional in this demo session.</p>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -275,9 +357,12 @@ function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <p className="eyebrow">Gmail account</p>
-          <strong>santoshpurohit@stylemeetsprice.com</strong>
-          <span>Manual sync prototype</span>
+          <p className="eyebrow">Signed in</p>
+          <strong>{session.name}</strong>
+          <span>{session.role}</span>
+          <button className="secondary-action auth-logout" onClick={handleLogout} type="button">
+            Log out
+          </button>
         </div>
       </aside>
 
