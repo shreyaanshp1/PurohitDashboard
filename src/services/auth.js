@@ -153,7 +153,7 @@ function matchesPassword(password, hash) {
 function signInWithLocalFallback({ username, password, otp }) {
   const normalizedUsername = String(username || "").trim().toLowerCase();
   const normalizedPassword = String(password || "").trim();
-  if (normalizedUsername !== DEMO_USER.username || normalizedPassword !== "demo") {
+  if (normalizedUsername !== DEMO_USER.username || normalizedPassword !== "demodemodemo") {
     throw new Error("Demo credentials are demo / demo. Supabase is not configured, so the demo account is the only fallback.");
   }
 
