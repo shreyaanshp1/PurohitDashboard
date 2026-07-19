@@ -10,6 +10,7 @@ npm-debug.log*
 .supabase*.env
 secrets/
 uploads/
+*.md
 
 # Leftover local Ruby install artifacts from the abandoned Rails spike.
 .bundle/
