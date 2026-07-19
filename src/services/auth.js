@@ -3,7 +3,7 @@ const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.
 const DEMO_USER = Object.freeze({
   username: "demo",
   name: "Demo Admin",
-  password_hash: hashPassword("demo"),
+  password_hash: hashPassword("demodemodemo"),
   two_factor_enabled: true,
   two_factor_secret: "demo-secret",
   role: "admin"
