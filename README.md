@@ -15,6 +15,20 @@ Then open the local Vite URL printed in the terminal.
 
 `npm run dev` starts the private purchase API and the Vite app together. Purchase and receipt data is persisted through Supabase, not browser `localStorage`.
 
+## Sign-In Credentials
+
+The previous built-in demo fallback has been removed. For real access control, use Supabase-backed users. For private local testing only, create `.env.local` and set:
+
+```sh
+VITE_DEMO_USERNAME=your-private-username
+VITE_DEMO_PASSWORD=your-long-private-password
+VITE_DEMO_NAME=Local Admin
+```
+
+Restart `npm run dev` after changing `.env.local`.
+
+Security note: Vite exposes `VITE_*` values to browser code. Do not rely on local demo credentials to protect a public deployment. Public deployments should use Supabase auth records and avoid enabling the local fallback.
+
 ## Useful Scripts
 
 ```sh

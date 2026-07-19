@@ -1,13 +1,6 @@
 const AUTH_STORAGE_KEY = "portfolio-auth";
 const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
-const DEMO_USER = Object.freeze({
-  username: "demo",
-  name: "Demo Admin",
-  password_hash: hashPassword("demodemodemo"),
-  two_factor_enabled: true,
-  two_factor_secret: "demo-secret",
-  role: "admin"
-});
+const DEFAULT_LOCAL_AUTH_NAME = "Local Admin";
 
 export function hashPassword(password) {
   if (typeof password !== "string" || !password.trim()) {
@@ -151,23 +144,48 @@ function matchesPassword(password, hash) {
 }
 
 function signInWithLocalFallback({ username, password, otp }) {
-  const normalizedUsername = String(username || "").trim().toLowerCase();
-  const normalizedPassword = String(password || "").trim();
-  if (normalizedUsername !== DEMO_USER.username || normalizedPassword !== "demodemodemo") {
-    throw new Error("Demo credentials are demo / demo. Supabase is not configured, so the demo account is the only fallback.");
+  const localUser = localAuthUser();
+  if (!localUser) {
+    throw new Error("Supabase is not configured and local demo credentials are disabled. Configure Supabase or set VITE_DEMO_USERNAME and VITE_DEMO_PASSWORD in .env.local.");
   }
 
-  if (String(otp || "").trim() && !verifyTwoFactorCode(DEMO_USER.two_factor_secret, otp)) {
+  const normalizedUsername = String(username || "").trim().toLowerCase();
+  const normalizedPassword = String(password || "").trim();
+  if (normalizedUsername !== localUser.username || !matchesPassword(normalizedPassword, localUser.password_hash)) {
+    throw new Error("Invalid username or password.");
+  }
+
+  if (localUser.two_factor_enabled && String(otp || "").trim() && !verifyTwoFactorCode(localUser.two_factor_secret, otp)) {
     throw new Error("Invalid two-factor code.");
   }
 
   const session = {
-    username: DEMO_USER.username,
-    name: DEMO_USER.name,
-    role: DEMO_USER.role
+    username: localUser.username,
+    name: localUser.name,
+    role: localUser.role
   };
   persistAuthSession(session);
   return session;
+}
+
+function localAuthUser() {
+  const username = localAuthValue("VITE_DEMO_USERNAME", "DEMO_USERNAME").trim().toLowerCase();
+  const password = localAuthValue("VITE_DEMO_PASSWORD", "DEMO_PASSWORD");
+  if (!username || !password.trim()) return null;
+
+  const twoFactorSecret = localAuthValue("VITE_DEMO_2FA_SECRET", "DEMO_2FA_SECRET").trim();
+  return {
+    username,
+    name: localAuthValue("VITE_DEMO_NAME", "DEMO_NAME").trim() || DEFAULT_LOCAL_AUTH_NAME,
+    password_hash: hashPassword(password.trim()),
+    two_factor_enabled: Boolean(twoFactorSecret),
+    two_factor_secret: twoFactorSecret,
+    role: localAuthValue("VITE_DEMO_ROLE", "DEMO_ROLE").trim() || "admin"
+  };
+}
+
+function localAuthValue(viteKey, processKey) {
+  return env[viteKey] || (typeof process !== "undefined" && process.env ? process.env[processKey] : "") || "";
 }
 
 function hasSupabaseConfig() {

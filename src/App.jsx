@@ -298,21 +298,21 @@ function App() {
           <div className="auth-card__header">
             <p className="eyebrow">Secure access</p>
             <h2>Sign in</h2>
-            <p>Use your Supabase-backed account or the demo account to access the command center.</p>
+            <p>Use your configured account to access the command center.</p>
           </div>
 
           <label className="auth-field">
             <span>Username</span>
-            <input onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} placeholder="demo" type="text" value={loginForm.username} />
+            <input onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username" type="text" value={loginForm.username} />
           </label>
 
           <label className="auth-field">
             <span>Password</span>
-            <input onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="demo" type="password" value={loginForm.password} />
+            <input onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" type="password" value={loginForm.password} />
           </label>
 
           <label className="auth-field">
-            <span>2FA code (optional for demo)</span>
+            <span>2FA code</span>
             <input onChange={(event) => setLoginForm((current) => ({ ...current, otp: event.target.value }))} placeholder="123456" type="text" value={loginForm.otp} />
           </label>
 
@@ -322,7 +322,7 @@ function App() {
             {isAuthenticating ? "Signing in..." : "Log in"}
           </button>
 
-          <p className="auth-hint">Demo credentials: demo / demo · 2FA code is optional in this demo session.</p>
+          <p className="auth-hint">Credentials are managed through Supabase or your local environment.</p>
         </form>
       </div>
     );
