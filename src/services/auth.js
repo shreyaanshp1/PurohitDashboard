@@ -1,38 +1,15 @@
+import { generateTwoFactorCode, hashPassword, verifyTwoFactorCode } from "./password.js";
+
 const AUTH_STORAGE_KEY = "portfolio-auth";
 const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
 const DEFAULT_LOCAL_AUTH_NAME = "Local Admin";
+const CONFIGURED_AUTH_ENDPOINT = trimTrailingSlash(env.VITE_AUTH_ENDPOINT || "");
+const CONFIGURED_PURCHASE_ENDPOINT = env.VITE_PURCHASE_LOG_ENDPOINT || "";
+const PURCHASE_ENDPOINT = CONFIGURED_PURCHASE_ENDPOINT || "/api/purchases";
+const API_ROOT = PURCHASE_ENDPOINT.replace(/\/purchases\/?$/, "") || "/api";
+const AUTH_API_ROOT = CONFIGURED_AUTH_ENDPOINT || `${API_ROOT}/auth`;
 
-export function hashPassword(password) {
-  if (typeof password !== "string" || !password.trim()) {
-    throw new Error("Password is required.");
-  }
-
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < password.length; index += 1) {
-    hash ^= password.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-export function generateTwoFactorCode(secret, timeWindow = Date.now()) {
-  const normalizedSecret = String(secret || "").trim();
-  if (!normalizedSecret) {
-    throw new Error("2FA secret is required.");
-  }
-
-  const bucket = Math.floor(timeWindow / 30_000);
-  const digest = hashPassword(`${normalizedSecret}:${bucket}`);
-  const code = digest.slice(-6).toUpperCase();
-  return code.replace(/[^0-9]/g, "").padStart(6, "0").slice(0, 6);
-}
-
-export function verifyTwoFactorCode(secret, code, timeWindow = Date.now()) {
-  if (typeof code !== "string") return false;
-  const expected = generateTwoFactorCode(secret, timeWindow);
-  return expected === String(code).trim().padStart(6, "0");
-}
+export { generateTwoFactorCode, hashPassword, verifyTwoFactorCode };
 
 export function persistAuthSession(session) {
   if (typeof window === "undefined") return;
@@ -64,6 +41,18 @@ export async function signInWithSupabase({ username, password, otp }) {
   }
 
   const normalizedUsername = String(username).trim().toLowerCase();
+  const localUser = localAuthUser();
+  if (!hasSupabaseConfig() && localUser) {
+    return signInWithLocalFallback({ username: normalizedUsername, password, otp });
+  }
+
+  if (shouldUseAuthApi()) {
+    const result = await postAuthJson("signin", { username: normalizedUsername, password, otp });
+    const session = result.session;
+    persistAuthSession(session);
+    return session;
+  }
+
   if (!hasSupabaseConfig()) {
     return signInWithLocalFallback({ username: normalizedUsername, password, otp });
   }
@@ -95,9 +84,16 @@ export async function signInWithSupabase({ username, password, otp }) {
   return session;
 }
 
-export async function registerUserInSupabase({ username, password, otpSecret, name, role = "user" }) {
+export async function registerUserInSupabase({ username, email = "", password, otpSecret, name, role = "user" }) {
   if (!username || !password) {
     throw new Error("Username and password are required.");
+  }
+
+  if (shouldUseAuthApi()) {
+    const result = await postAuthJson("signup", { username, email, password, name, role });
+    const session = result.session;
+    persistAuthSession(session);
+    return result.user || session;
   }
 
   if (!hasSupabaseConfig()) {
@@ -111,6 +107,7 @@ export async function registerUserInSupabase({ username, password, otpSecret, na
   }
 
   const record = {
+    email: String(email || "").trim().toLowerCase(),
     username: normalizedUsername,
     name: String(name || normalizedUsername).trim(),
     password_hash: hashPassword(password),
@@ -121,6 +118,45 @@ export async function registerUserInSupabase({ username, password, otpSecret, na
 
   await upsertUserRecord(record);
   return record;
+}
+
+export async function signUpWithSupabase({ username, email, password, name }) {
+  if (!username || !email || !password) {
+    throw new Error("Name, email, username, and password are required.");
+  }
+
+  if (shouldUseAuthApi()) {
+    const result = await postAuthJson("signup", { username, email, password, name });
+    const session = result.session;
+    persistAuthSession(session);
+    return session;
+  }
+
+  return registerUserInSupabase({ email, username, password, name });
+}
+
+export async function requestPasswordReset({ identifier, resetUrlBase }) {
+  if (!identifier) {
+    throw new Error("Username or email is required.");
+  }
+
+  if (!shouldUseAuthApi()) {
+    throw new Error("Password reset requires the auth API. Start the local API server or configure VITE_AUTH_ENDPOINT.");
+  }
+
+  return postAuthJson("password-reset/request", { identifier, resetUrlBase });
+}
+
+export async function resetPassword({ token, password }) {
+  if (!token || !password) {
+    throw new Error("Reset token and new password are required.");
+  }
+
+  if (!shouldUseAuthApi()) {
+    throw new Error("Password reset requires the auth API. Start the local API server or configure VITE_AUTH_ENDPOINT.");
+  }
+
+  return postAuthJson("password-reset/confirm", { token, password });
 }
 
 async function loadUserFromSupabase(username) {
@@ -218,4 +254,44 @@ async function parseSupabaseResponse(response) {
     throw new Error(data?.message || `Supabase request failed with status ${response.status}.`);
   }
   return data;
+}
+
+async function postAuthJson(path, payload) {
+  const response = await fetch(`${AUTH_API_ROOT}/${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+  const text = await response.text();
+  const body = parseJsonResponse(text, response);
+
+  if (!response.ok || body?.success === false) {
+    throw new Error(body?.error || body?.message || `Auth request failed with status ${response.status}.`);
+  }
+
+  return body;
+}
+
+function parseJsonResponse(text, response) {
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const isHtml = /<!doctype html|<html[\s>]/i.test(text);
+    const detail = isHtml ? "HTML" : "a non-JSON response";
+    throw new Error(`Auth API returned ${detail} for ${response.url}. Check the auth endpoint configuration.`);
+  }
+}
+
+function shouldUseAuthApi() {
+  if (typeof window === "undefined") return false;
+  if (CONFIGURED_AUTH_ENDPOINT || CONFIGURED_PURCHASE_ENDPOINT) return true;
+  return !window.location.hostname.endsWith("github.io");
+}
+
+function trimTrailingSlash(value) {
+  return String(value || "").trim().replace(/\/$/, "");
 }

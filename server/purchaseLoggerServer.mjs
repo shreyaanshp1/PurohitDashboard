@@ -1,4 +1,10 @@
 import http from "node:http";
+import {
+  confirmAuthPasswordReset,
+  registerAuthUser,
+  requestAuthPasswordReset,
+  signInAuthUser
+} from "./authService.mjs";
 import { clearCostcoOrders, importCostcoOrders, listCostcoOrders } from "./costcoOrderImporter.mjs";
 import { exchangeGoogleOAuthCode, getGoogleAuthUrl, getGoogleOAuthStatus } from "./googleOAuthClient.mjs";
 import { clearUsMintOrders, importUsMintOrders, listUsMintOrders } from "./usMintOrderImporter.mjs";
@@ -16,6 +22,7 @@ import { loadEnvFiles } from "./serverEnv.mjs";
 
 loadEnvFiles();
 
+const HOST = "127.0.0.1";
 const PORT = Number(process.env.PURCHASE_LOG_SERVER_PORT || 8787);
 const GOOGLE_OAUTH_MESSAGE_TYPE = "google-oauth-complete";
 const ALLOWED_ORIGINS = new Set(
@@ -66,11 +73,59 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Purchase log API listening at http://127.0.0.1:${PORT}`);
+server.on("error", async (error) => {
+  if (error.code !== "EADDRINUSE") {
+    console.error("[purchase-log-api]", error);
+    process.exit(1);
+  }
+
+  const runningService = await readRunningServiceHealth();
+  if (runningService?.service === "purchase-log-api") {
+    console.log(`Purchase log API is already running at http://${HOST}:${PORT}`);
+    process.exit(0);
+  }
+
+  console.error(
+    `Port ${PORT} is already in use. Stop the process using http://${HOST}:${PORT}, or set PURCHASE_LOG_SERVER_PORT to a free port.`
+  );
+  process.exit(1);
 });
 
+server.listen(PORT, HOST, () => {
+  console.log(`Purchase log API listening at http://${HOST}:${PORT}`);
+});
+
+async function readRunningServiceHealth() {
+  try {
+    const response = await fetch(`http://${HOST}:${PORT}/health`);
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
 async function routeApiRequest(request, url) {
+  if (url.pathname === "/api/auth/signin" && request.method === "POST") {
+    const payload = await readJsonBody(request);
+    return signInAuthUser(payload);
+  }
+
+  if (url.pathname === "/api/auth/signup" && request.method === "POST") {
+    const payload = await readJsonBody(request);
+    return registerAuthUser(payload);
+  }
+
+  if (url.pathname === "/api/auth/password-reset/request" && request.method === "POST") {
+    const payload = await readJsonBody(request);
+    return requestAuthPasswordReset(payload);
+  }
+
+  if (url.pathname === "/api/auth/password-reset/confirm" && request.method === "POST") {
+    const payload = await readJsonBody(request);
+    return confirmAuthPasswordReset(payload);
+  }
+
   if (url.pathname === "/api/purchases") {
     if (request.method === "GET") {
       return listRecentPurchases(url.searchParams.get("limit"));
@@ -207,6 +262,10 @@ async function routeApiRequest(request, url) {
 
   const knownPath = [
     "/api/purchases",
+    "/api/auth/signin",
+    "/api/auth/signup",
+    "/api/auth/password-reset/request",
+    "/api/auth/password-reset/confirm",
     "/api/receipt-folders",
     "/api/receipts",
     "/api/receipt-files",

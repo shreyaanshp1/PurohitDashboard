@@ -455,7 +455,7 @@ function toNumericId(value) {
   return Number.isFinite(id) ? id : null;
 }
 
-function supabaseUrl() {
+export function supabaseUrl() {
   const url = process.env.SUPABASE_URL;
   if (!url) throw new Error("Missing SUPABASE_URL.");
   return url.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
@@ -474,7 +474,7 @@ function supabaseServerKey() {
   throw new Error("Missing SUPABASE_SECRET_KEY.");
 }
 
-function supabaseHeaders(options = {}) {
+export function supabaseHeaders(options = {}) {
   const key = supabaseServerKey();
   const headers = {
     apikey: key,
@@ -489,7 +489,7 @@ function supabaseHeaders(options = {}) {
   return headers;
 }
 
-async function parseSupabaseResponse(response) {
+export async function parseSupabaseResponse(response) {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
 
