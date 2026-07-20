@@ -508,11 +508,12 @@ export const reports = [
 ];
 
 export const syncSettings = [
-  { source: "Gmail Costco", query: "Costco order, renewal, shipment, reward emails", status: "Prototype mapped", cadence: "Manual now" },
-  { source: "Gmail US Mint", query: "Release, subscription, charge, shipping emails", status: "Planned", cadence: "Daily later" },
-  { source: "Google Sheets Travel", query: "Trips, Flights, Certificates_Awards tabs", status: "Connected through service account", cadence: "Manual refresh" },
-  { source: "Gmail Dell", query: "Order, shipped, rewards, fulfillment emails", status: "Planned", cadence: "Daily later" },
-  { source: "Excel Upload", query: "Memberships, buyers, inventory, sales", status: "Planned", cadence: "On demand" }
+  { source: "Google Sheets Costco", query: "Accounts, Orders, Rewards, Renewals tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
+  { source: "Google Sheets US Mint", query: "Accounts, Orders, Release Calendar, Subscriptions tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
+  { source: "Google Sheets Travel", query: "Trips, Flights, Certificates_Awards tabs", status: "Connected through service account", cadence: "Refresh and log rows" },
+  { source: "Google Sheets Dell", query: "Accounts, Orders, Items, Rewards, Fulfillment, Sales tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
+  { source: "Google Sheets Ops", query: "Buyers, rewards, alerts, reports, and inventory tabs", status: "Spreadsheet IDs ready", cadence: "Refresh and log rows" },
+  { source: "Gmail OAuth", query: "Optional Costco and US Mint email import", status: "Can be disabled in Settings", cadence: "Manual only" }
 ];
 
 export const alertRules = [

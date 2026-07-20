@@ -8,10 +8,20 @@ const GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
 
 export function hasGoogleOAuthConfig() {
-  return Boolean(googleOAuthConfig().clientId && googleOAuthConfig().clientSecret);
+  return !isGoogleOAuthDisabled() && Boolean(googleOAuthConfig().clientId && googleOAuthConfig().clientSecret);
 }
 
 export async function getGoogleOAuthStatus() {
+  if (isGoogleOAuthDisabled()) {
+    return {
+      success: true,
+      configured: false,
+      authenticated: false,
+      disabled: true,
+      expiresAt: null
+    };
+  }
+
   const token = await readStoredToken();
 
   return {
@@ -23,6 +33,8 @@ export async function getGoogleOAuthStatus() {
 }
 
 export function getGoogleAuthUrl({ state = "" } = {}) {
+  if (isGoogleOAuthDisabled()) throw googleOAuthDisabledError();
+
   const { clientId, redirectUri } = requiredGoogleOAuthConfig();
   const params = new URLSearchParams({
     access_type: "offline",
@@ -45,6 +57,7 @@ export function getGoogleAuthUrl({ state = "" } = {}) {
 }
 
 export async function exchangeGoogleOAuthCode(code) {
+  if (isGoogleOAuthDisabled()) throw googleOAuthDisabledError();
   if (!code) throw new Error("Missing Google OAuth code.");
 
   const { clientId, clientSecret, redirectUri } = requiredGoogleOAuthConfig();
@@ -65,6 +78,8 @@ export async function exchangeGoogleOAuthCode(code) {
 }
 
 export async function listGmailMessages({ query, limit = 25 }) {
+  if (isGoogleOAuthDisabled()) throw googleOAuthDisabledError();
+
   const accessToken = await getGmailAccessToken();
   const maxResults = Math.min(Math.max(Number(limit) || 25, 1), 10000);
   const messages = [];
@@ -87,6 +102,8 @@ export async function listGmailMessages({ query, limit = 25 }) {
 }
 
 export async function getGmailMessageText(messageId) {
+  if (isGoogleOAuthDisabled()) throw googleOAuthDisabledError();
+
   const accessToken = await getGmailAccessToken();
   const message = await gmailRequest(`/users/me/messages/${encodeURIComponent(messageId)}?format=full`, accessToken);
   const headers = message.payload?.headers || [];
@@ -181,6 +198,16 @@ function googleOAuthConfig() {
     clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET || "",
     redirectUri: process.env.GOOGLE_OAUTH_REDIRECT_URI || "http://127.0.0.1:8787/api/google/oauth/callback"
   };
+}
+
+function isGoogleOAuthDisabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.GOOGLE_OAUTH_DISABLED || "").trim());
+}
+
+function googleOAuthDisabledError() {
+  const error = new Error("Google OAuth is disabled for this application.");
+  error.statusCode = 403;
+  return error;
 }
 
 function requiredGoogleOAuthConfig() {

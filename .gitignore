@@ -10,6 +10,9 @@ npm-debug.log*
 secrets/
 uploads/
 *.md
+!README.md
+!docs/
+!docs/*.md
 
 # Leftover local Ruby install artifacts from the abandoned Rails spike.
 .bundle/

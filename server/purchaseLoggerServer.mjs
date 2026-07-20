@@ -19,6 +19,7 @@ import {
 import { appendPurchase, listRecentPurchases } from "./purchaseStore.mjs";
 import { readReceiptFile, saveReceiptFile } from "./receiptFiles.mjs";
 import { loadEnvFiles } from "./serverEnv.mjs";
+import { appendSpreadsheetSourceRow, listSpreadsheetSource } from "./spreadsheetSources.mjs";
 
 loadEnvFiles();
 
@@ -252,6 +253,21 @@ async function routeApiRequest(request, url) {
     }
   }
 
+  const spreadsheetSourceMatch = url.pathname.match(/^\/api\/spreadsheets\/([^/]+)$/);
+  if (spreadsheetSourceMatch && request.method === "GET") {
+    return listSpreadsheetSource(decodeURIComponent(spreadsheetSourceMatch[1]));
+  }
+
+  const spreadsheetAppendMatch = url.pathname.match(/^\/api\/spreadsheets\/([^/]+)\/([^/]+)\/rows$/);
+  if (spreadsheetAppendMatch && request.method === "POST") {
+    const payload = await readJsonBody(request);
+    return appendSpreadsheetSourceRow({
+      sourceId: decodeURIComponent(spreadsheetAppendMatch[1]),
+      sheetName: decodeURIComponent(spreadsheetAppendMatch[2]),
+      values: payload.values || payload.row || {}
+    });
+  }
+
   if (url.pathname.startsWith("/api/travel/sheets/") && url.pathname.endsWith("/rows")) {
     if (request.method === "POST") {
       const sheetName = decodeURIComponent(url.pathname.slice("/api/travel/sheets/".length, -"/rows".length));
@@ -280,7 +296,7 @@ async function routeApiRequest(request, url) {
     "/api/us-mint-orders/clear",
     "/api/travel/sheets",
     "/api/travel/master-data"
-  ].includes(url.pathname) || url.pathname.startsWith("/api/travel/sheets/");
+  ].includes(url.pathname) || url.pathname.startsWith("/api/travel/sheets/") || url.pathname.startsWith("/api/spreadsheets/");
   const error = new Error(knownPath ? "Method not allowed." : "Not found.");
   error.statusCode = knownPath ? 405 : 404;
   throw error;

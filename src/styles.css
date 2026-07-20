@@ -999,8 +999,63 @@ button {
   padding: 18px;
 }
 
-.receipt-toolbar h3 {
+.receipt-toolbar h3,
+.sheet-source-toolbar h3 {
   margin: 0;
+}
+
+.sheet-source-toolbar {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 18px;
+}
+
+.sheet-source-toolbar span {
+  color: var(--muted);
+}
+
+.settings-control-row {
+  align-items: center;
+  background: #fafbfc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.settings-control-row p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+.toggle-control {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #39434c;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-weight: 850;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 12px;
+}
+
+.toggle-control input {
+  accent-color: var(--ink);
+  height: 18px;
+  width: 18px;
 }
 
 .folder-select {
@@ -1842,6 +1897,7 @@ tbody tr:last-child td {
   .page-header,
   .section-heading,
   .receipt-toolbar,
+  .sheet-source-toolbar,
   .travel-command,
   .profile-identity,
   .purchase-logger__header,
@@ -1856,6 +1912,11 @@ tbody tr:last-child td {
 
   .toolbar-actions {
     justify-content: flex-start;
+  }
+
+  .settings-control-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .search-box,

@@ -130,6 +130,25 @@ export async function appendTravelSheetRow({ sheetName, values }) {
   return postJson(`${API_ROOT}/travel/sheets/${encodeURIComponent(sheetName)}/rows`, { values });
 }
 
+export async function listSpreadsheetSource(source) {
+  if (!HAS_PURCHASE_BACKEND) {
+    return {
+      configured: false,
+      message: "Spreadsheet backend is not configured for this deployment.",
+      sheets: [],
+      source,
+      success: true
+    };
+  }
+
+  return requestJson(`${API_ROOT}/spreadsheets/${encodeURIComponent(source)}`);
+}
+
+export async function appendSpreadsheetSourceRow({ source, sheetName, values }) {
+  requirePurchaseBackend("Google Sheets logging");
+  return postJson(`${API_ROOT}/spreadsheets/${encodeURIComponent(source)}/${encodeURIComponent(sheetName)}/rows`, { values });
+}
+
 async function postJson(url, payload) {
   return requestJson(url, {
     method: "POST",

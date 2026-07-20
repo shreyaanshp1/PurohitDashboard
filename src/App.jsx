@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   ArrowUpDown,
@@ -64,6 +64,7 @@ import {
 import {
   clearCostcoOrders,
   clearUsMintOrders,
+  appendSpreadsheetSourceRow,
   appendTravelSheetRow,
   createReceiptFolder,
   getGoogleOAuthStatus,
@@ -71,6 +72,7 @@ import {
   importCostcoOrders,
   importUsMintOrders,
   listCostcoOrders,
+  listSpreadsheetSource,
   listTravelMasterData,
   listTravelSheets,
   listUsMintOrders,
@@ -118,7 +120,7 @@ const columns = {
   settings: ["source", "query", "status", "cadence"]
 };
 
-const costcoTabs = ["Accounts", "Email Orders", "Manual Pulls", "Combined Table", "Rewards Planner", "Renewals"];
+const costcoTabs = ["Accounts", "Email Orders", "Manual Pulls", "Combined Table", "Rewards Planner", "Renewals", "Google Sheets"];
 const costcoSortableOrderColumns = ["status", "item", "date"];
 const travelSheetNames = ["Trips", "Flights", "Certificates_Awards"];
 const travelMasterDataSheetNames = [
@@ -149,12 +151,20 @@ const fallbackTravelSheets = travelSheetNames.map((name) => ({
   rows: [],
   rowCount: 0
 }));
-const usMintTabs = ["Accounts", "Email Orders", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales"];
+const usMintTabs = ["Accounts", "Email Orders", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales", "Google Sheets"];
 const googleOAuthMessageType = "google-oauth-complete";
 const googleOAuthPopupFeatures = "popup=yes,width=520,height=720,left=160,top=80";
 const googleOAuthWaitMs = 120000;
+const googleOAuthDisabledStorageKey = "portfolio-google-oauth-disabled";
 
-async function connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus }) {
+async function connectGoogleOAuth({ googleOAuthDisabled = false, notifyError, notifySuccess, setGoogleStatus }) {
+  if (googleOAuthDisabled) {
+    const status = { authenticated: false, configured: false, disabled: true };
+    setGoogleStatus?.(status);
+    notifyError("Google OAuth is disabled.", "Turn it back on in Settings before connecting Gmail.");
+    return status;
+  }
+
   let oauthWindow = null;
 
   try {
@@ -257,6 +267,7 @@ function App() {
   const [activePage, setActivePage] = useState("home");
   const [query, setQuery] = useState("");
   const [session, setSession] = useState(readAuthSession());
+  const [googleOAuthDisabled, setGoogleOAuthDisabled] = useState(readGoogleOAuthDisabledPreference());
 
   const pageTitle = navItems.find((item) => item.id === activePage)?.label || "Home";
 
@@ -270,6 +281,12 @@ function App() {
   function handleLogout() {
     clearAuthSession();
     setSession(null);
+  }
+
+  function setGoogleOAuthDisabledPreference(disabled) {
+    const nextValue = Boolean(disabled);
+    setGoogleOAuthDisabled(nextValue);
+    writeGoogleOAuthDisabledPreference(nextValue);
   }
 
   if (!session) {
@@ -316,7 +333,14 @@ function App() {
 
       <main className="main-content">
         <Header title={pageTitle} activePage={activePage} query={query} setQuery={setQuery} />
-        <Page activePage={activePage} setActivePage={setActivePage} query={query} session={session} />
+        <Page
+          activePage={activePage}
+          googleOAuthDisabled={googleOAuthDisabled}
+          onToggleGoogleOAuthDisabled={setGoogleOAuthDisabledPreference}
+          query={query}
+          session={session}
+          setActivePage={setActivePage}
+        />
       </main>
     </div>
   );
@@ -634,6 +658,16 @@ function clearPasswordResetTokenFromUrl() {
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+function readGoogleOAuthDisabledPreference() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(googleOAuthDisabledStorageKey) === "true";
+}
+
+function writeGoogleOAuthDisabledPreference(disabled) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(googleOAuthDisabledStorageKey, disabled ? "true" : "false");
+}
+
 function Header({ title, activePage, query, setQuery }) {
   return (
     <section className="page-header">
@@ -656,12 +690,12 @@ function Header({ title, activePage, query, setQuery }) {
   );
 }
 
-function Page({ activePage, setActivePage, query, session }) {
+function Page({ activePage, googleOAuthDisabled, onToggleGoogleOAuthDisabled, setActivePage, query, session }) {
   if (activePage === "home") return <HomePage setActivePage={setActivePage} query={query} />;
   if (activePage === "profile") return <ProfilePage query={query} session={session} setActivePage={setActivePage} />;
-  if (activePage === "costco") return <CostcoPage query={query} />;
+  if (activePage === "costco") return <CostcoPage googleOAuthDisabled={googleOAuthDisabled} query={query} />;
   if (activePage === "travel") return <TravelPage query={query} />;
-  if (activePage === "usMint") return <UsMintPage query={query} />;
+  if (activePage === "usMint") return <UsMintPage googleOAuthDisabled={googleOAuthDisabled} query={query} />;
   if (activePage === "dell") return <DellPage query={query} />;
   if (activePage === "commodities") return <CommoditiesPage query={query} />;
   if (activePage === "receipts") return <ReceiptsPage query={query} />;
@@ -669,7 +703,13 @@ function Page({ activePage, setActivePage, query, session }) {
   if (activePage === "rewards") return <RewardsPage query={query} />;
   if (activePage === "alerts") return <AlertsPage query={query} />;
   if (activePage === "reports") return <ReportsPage query={query} />;
-  return <SettingsPage query={query} />;
+  return (
+    <SettingsPage
+      googleOAuthDisabled={googleOAuthDisabled}
+      onToggleGoogleOAuthDisabled={onToggleGoogleOAuthDisabled}
+      query={query}
+    />
+  );
 }
 
 function HomePage({ setActivePage, query }) {
@@ -860,6 +900,204 @@ function ProfileTimeline({ items }) {
   );
 }
 
+function SpreadsheetSourceWorkspace({ sourceId, fallbackColumns, fallbackRows, query, title }) {
+  const sourceState = useSpreadsheetSource(sourceId);
+  const [activeSheetName, setActiveSheetName] = useState("");
+  const [isLogOpen, setIsLogOpen] = useState(false);
+  const activeSheet = getActiveSpreadsheetSheet(sourceState.sheets, activeSheetName);
+  const hasConnectedRows = sourceState.configured && activeSheet && !activeSheet.error;
+  const columnsToShow = hasConnectedRows ? spreadsheetColumns(activeSheet, fallbackColumns) : fallbackColumns;
+  const rowsToShow = filterRows(hasConnectedRows ? activeSheet.rows : fallbackRows, query);
+  const sheetLabels = sourceState.sheets.map((sheet) => sheet.name);
+  const canAddRow = Boolean(hasConnectedRows && columnsToShow.length);
+  const aside = sourceState.isLoading
+    ? "Loading"
+    : sourceState.configured
+      ? `${rowsToShow.length} rows`
+      : "Static fallback";
+
+  useEffect(() => {
+    if (!activeSheetName && sourceState.sheets[0]?.name) {
+      setActiveSheetName(sourceState.sheets[0].name);
+    }
+  }, [activeSheetName, sourceState.sheets]);
+
+  return (
+    <>
+      <section className="sheet-source-toolbar">
+        <div>
+          <p className="eyebrow">Google Sheets</p>
+          <h3>{sourceState.label || title}</h3>
+          <span>{sourceState.configured ? "Connected through service account" : sourceState.message}</span>
+        </div>
+        <div className="toolbar-actions">
+          <span className={`status-pill ${sourceState.configured ? "" : "muted"}`}>
+            {sourceState.configured ? "Sheets connected" : "Not connected"}
+          </span>
+          <button className="secondary-action" disabled={sourceState.isLoading} onClick={() => sourceState.refresh({ silent: true })} type="button">
+            <RefreshCw className={sourceState.isLoading ? "spin" : ""} size={18} />
+            <span>{sourceState.isLoading ? "Refreshing..." : "Refresh"}</span>
+          </button>
+          <button className="purchase-submit" disabled={!canAddRow} onClick={() => setIsLogOpen(true)} type="button">
+            <Plus size={18} />
+            <span>Log Row</span>
+          </button>
+        </div>
+      </section>
+
+      {sheetLabels.length > 1 ? (
+        <TabStrip labels={sheetLabels} activeLabel={activeSheet?.name || sheetLabels[0]} onSelect={setActiveSheetName} />
+      ) : null}
+
+      <Panel eyebrow={sourceState.configured ? "Spreadsheet rows" : "Local fallback"} title={activeSheet?.name || title} aside={aside}>
+        {activeSheet?.error ? <p className="empty-copy">Sheet unavailable: {activeSheet.error}</p> : null}
+        {columnsToShow.length ? (
+          <DataTable columns={columnsToShow} rows={rowsToShow} sortableColumns={columnsToShow.slice(0, 4)} />
+        ) : (
+          <p className="empty-copy">No headers found for this sheet.</p>
+        )}
+      </Panel>
+
+      {isLogOpen && activeSheet ? (
+        <SpreadsheetLogModal
+          onClose={() => setIsLogOpen(false)}
+          onSaved={() => sourceState.refresh({ silent: false })}
+          sheet={activeSheet}
+          sourceId={sourceId}
+          sourceLabel={sourceState.label || title}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function SpreadsheetLogModal({ onClose, onSaved, sheet, sourceId, sourceLabel }) {
+  const headers = spreadsheetColumns(sheet, []);
+  const [values, setValues] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const { notifyError, notifySuccess } = useToast();
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setIsSaving(true);
+
+    try {
+      await appendSpreadsheetSourceRow({ sheetName: sheet.name, source: sourceId, values });
+      notifySuccess(`Added row to ${sourceLabel}.`, sheet.name);
+      await onSaved?.();
+      onClose();
+    } catch (error) {
+      console.error("Failed to append spreadsheet row", error);
+      notifyError("Could not add spreadsheet row.", error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="logger-modal" role="presentation">
+      <button className="logger-modal__backdrop" aria-label="Close spreadsheet logger" onClick={onClose} type="button" />
+      <form aria-modal="true" className="logger-modal__surface travel-log-panel" onSubmit={handleSubmit} role="dialog">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">{sourceLabel}</p>
+            <h3>Log {sheet.name} Row</h3>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" aria-label="Close spreadsheet logger">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="travel-form-grid">
+          {headers.map((header) => (
+            <label className={`travel-field ${isLongTravelField(header) ? "travel-field-full" : ""}`} key={header}>
+              <span>{header}</span>
+              {isLongTravelField(header) ? (
+                <textarea
+                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
+                  rows={3}
+                  value={values[header] || ""}
+                />
+              ) : (
+                <input
+                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
+                  type={getTravelInputType(header)}
+                  value={values[header] || ""}
+                />
+              )}
+            </label>
+          ))}
+        </div>
+
+        <div className="travel-modal-actions">
+          <button className="secondary-action" onClick={onClose} type="button">
+            Cancel
+          </button>
+          <button className="purchase-submit" disabled={isSaving || !headers.length} type="submit">
+            <Plus size={18} />
+            <span>{isSaving ? "Adding..." : "Add Row"}</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function useSpreadsheetSource(sourceId) {
+  const [state, setState] = useState({
+    configured: false,
+    isLoading: true,
+    label: "",
+    message: "",
+    sheets: [],
+    source: sourceId
+  });
+  const { notifyError, notifySuccess } = useToast();
+
+  const refresh = useCallback(
+    async ({ silent = false } = {}) => {
+      setState((current) => ({ ...current, isLoading: true }));
+
+      try {
+        const result = await listSpreadsheetSource(sourceId);
+        setState({
+          configured: Boolean(result.configured),
+          isLoading: false,
+          label: result.label || sourceId,
+          message: result.message || "",
+          sheets: result.sheets || [],
+          source: result.source || sourceId
+        });
+        if (silent) notifySuccess("Spreadsheet data refreshed.", result.label || sourceId);
+      } catch (error) {
+        console.error("Failed to load spreadsheet source", error);
+        setState((current) => ({ ...current, isLoading: false, message: error.message }));
+        notifyError("Could not load spreadsheet source.", error.message);
+      }
+    },
+    [notifyError, notifySuccess, sourceId]
+  );
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return {
+    ...state,
+    refresh
+  };
+}
+
+function getActiveSpreadsheetSheet(sheets, activeSheetName) {
+  if (!sheets.length) return null;
+  return sheets.find((sheet) => sheet.name === activeSheetName) || sheets[0];
+}
+
+function spreadsheetColumns(sheet, fallbackColumns) {
+  const headers = (sheet?.headers || []).filter((header) => header && header !== "id");
+  return headers.length ? headers : fallbackColumns;
+}
+
 function PurchaseLoggerModal({ onClose }) {
   return (
     <div className="logger-modal" role="presentation">
@@ -871,7 +1109,7 @@ function PurchaseLoggerModal({ onClose }) {
   );
 }
 
-function CostcoPage({ query }) {
+function CostcoPage({ googleOAuthDisabled, query }) {
   const [orders, setOrders] = useState([]);
   const [activeCostcoTab, setActiveCostcoTab] = useState("Email Orders");
   const [selectedCostcoAccountId, setSelectedCostcoAccountId] = useState(costcoAccounts[0]?.id || "");
@@ -890,7 +1128,7 @@ function CostcoPage({ query }) {
       setIsLoading(true);
 
       const [statusResult, ordersResult] = await Promise.allSettled([
-        getGoogleOAuthStatus(),
+        googleOAuthDisabled ? Promise.resolve({ authenticated: false, configured: false, disabled: true }) : getGoogleOAuthStatus(),
         listCostcoOrders({ limit: 1000 })
       ]);
 
@@ -918,7 +1156,7 @@ function CostcoPage({ query }) {
     return () => {
       isCurrent = false;
     };
-  }, [notifyError]);
+  }, [googleOAuthDisabled, notifyError]);
 
   const visibleOrders = filterRows(orders, query);
   const visibleManualPulls = filterRows(costcoManualPulls, query);
@@ -957,17 +1195,24 @@ function CostcoPage({ query }) {
   const isCostcoBusy = isClearing || isImporting || isImportingHistory;
   const gmailStatus = isLoading
     ? "Loading"
-    : googleStatus.authenticated
+    : googleOAuthDisabled || googleStatus.disabled
+      ? "OAuth disabled"
+      : googleStatus.authenticated
       ? "Gmail connected"
       : googleStatus.configured
         ? "Gmail ready"
         : "OAuth missing";
 
   async function handleConnectGmail() {
-    return connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus });
+    return connectGoogleOAuth({ googleOAuthDisabled, notifyError, notifySuccess, setGoogleStatus });
   }
 
   async function handleImportOrders({ allHistory = false } = {}) {
+    if (googleOAuthDisabled) {
+      notifyError("Google OAuth is disabled.", "Turn it back on in Settings before importing Gmail.");
+      return;
+    }
+
     let latestStatus = await getGoogleOAuthStatus();
     setGoogleStatus(latestStatus);
 
@@ -1046,8 +1291,8 @@ function CostcoPage({ query }) {
               <h3>Costco Email Orders</h3>
             </div>
             <div className="toolbar-actions">
-              <span className={`status-pill ${googleStatus.authenticated ? "" : "muted"}`}>{gmailStatus}</span>
-              <button className="secondary-action" disabled={!googleStatus.configured || isCostcoBusy} onClick={handleConnectGmail} type="button">
+              <span className={`status-pill ${googleStatus.authenticated && !googleOAuthDisabled ? "" : "muted"}`}>{gmailStatus}</span>
+              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={handleConnectGmail} type="button">
                 <MailCheck size={18} />
                 <span>Connect Gmail</span>
               </button>
@@ -1055,11 +1300,11 @@ function CostcoPage({ query }) {
                 <Trash2 size={18} />
                 <span>{isClearing ? "Clearing..." : "Clear Batch"}</span>
               </button>
-              <button className="secondary-action" disabled={!googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders()} type="button">
+              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders()} type="button">
                 <RefreshCw className={isImporting ? "spin" : ""} size={18} />
                 <span>{isImporting ? "Importing..." : "Import Emails"}</span>
               </button>
-              <button className="purchase-submit" disabled={!googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
+              <button className="purchase-submit" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
                 <RefreshCw className={isImportingHistory ? "spin" : ""} size={18} />
                 <span>{isImportingHistory ? "Importing..." : "Import All History"}</span>
               </button>
@@ -1093,6 +1338,16 @@ function CostcoPage({ query }) {
 
       {activeCostcoTab === "Renewals" ? (
         <CostcoRenewalsTab reminders={visibleRenewalReminders} onSendReminder={handleSendRenewalReminder} />
+      ) : null}
+
+      {activeCostcoTab === "Google Sheets" ? (
+        <SpreadsheetSourceWorkspace
+          fallbackColumns={columns.costcoOrders}
+          fallbackRows={costco.orders}
+          query={query}
+          sourceId="costco"
+          title="Costco Sheets"
+        />
       ) : null}
 
     </>
@@ -1655,7 +1910,7 @@ function TravelLogModal({ activeSheetName, onClose, onSaved, sheets }) {
   );
 }
 
-function UsMintPage({ query }) {
+function UsMintPage({ googleOAuthDisabled, query }) {
   const [orders, setOrders] = useState([]);
   const [activeUsMintTab, setActiveUsMintTab] = useState("Accounts");
   const [selectedUsMintAccountId, setSelectedUsMintAccountId] = useState(usMintAccounts[0]?.id || "");
@@ -1674,7 +1929,7 @@ function UsMintPage({ query }) {
       setIsLoading(true);
 
       const [statusResult, ordersResult] = await Promise.allSettled([
-        getGoogleOAuthStatus(),
+        googleOAuthDisabled ? Promise.resolve({ authenticated: false, configured: false, disabled: true }) : getGoogleOAuthStatus(),
         listUsMintOrders({ limit: 1000 })
       ]);
 
@@ -1702,7 +1957,7 @@ function UsMintPage({ query }) {
     return () => {
       isCurrent = false;
     };
-  }, [notifyError]);
+  }, [googleOAuthDisabled, notifyError]);
 
   const visibleOrders = filterRows(orders, query);
   const visibleUsMintAccounts = useMemo(() => filterRows(usMintAccounts, query), [query]);
@@ -1722,7 +1977,9 @@ function UsMintPage({ query }) {
   const isUsMintBusy = isClearing || isImporting || isImportingHistory;
   const gmailStatus = isLoading
     ? "Loading"
-    : googleStatus.authenticated
+    : googleOAuthDisabled || googleStatus.disabled
+      ? "OAuth disabled"
+      : googleStatus.authenticated
       ? "Gmail connected"
       : googleStatus.configured
         ? "Gmail ready"
@@ -1735,10 +1992,15 @@ function UsMintPage({ query }) {
   ];
 
   async function handleConnectGmail() {
-    return connectGoogleOAuth({ notifyError, notifySuccess, setGoogleStatus });
+    return connectGoogleOAuth({ googleOAuthDisabled, notifyError, notifySuccess, setGoogleStatus });
   }
 
   async function handleImportOrders({ allHistory = false } = {}) {
+    if (googleOAuthDisabled) {
+      notifyError("Google OAuth is disabled.", "Turn it back on in Settings before importing Gmail.");
+      return;
+    }
+
     let latestStatus = await getGoogleOAuthStatus();
     setGoogleStatus(latestStatus);
 
@@ -1812,8 +2074,8 @@ function UsMintPage({ query }) {
               <h3>US Mint Confirmed Orders</h3>
             </div>
             <div className="toolbar-actions">
-              <span className={`status-pill ${googleStatus.authenticated ? "" : "muted"}`}>{gmailStatus}</span>
-              <button className="secondary-action" disabled={!googleStatus.configured || isUsMintBusy} onClick={handleConnectGmail} type="button">
+              <span className={`status-pill ${googleStatus.authenticated && !googleOAuthDisabled ? "" : "muted"}`}>{gmailStatus}</span>
+              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={handleConnectGmail} type="button">
                 <MailCheck size={18} />
                 <span>Connect Gmail</span>
               </button>
@@ -1821,11 +2083,11 @@ function UsMintPage({ query }) {
                 <Trash2 size={18} />
                 <span>{isClearing ? "Clearing..." : "Clear Batch"}</span>
               </button>
-              <button className="secondary-action" disabled={!googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders()} type="button">
+              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders()} type="button">
                 <RefreshCw className={isImporting ? "spin" : ""} size={18} />
                 <span>{isImporting ? "Importing..." : "Import Emails"}</span>
               </button>
-              <button className="purchase-submit" disabled={!googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
+              <button className="purchase-submit" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
                 <RefreshCw className={isImportingHistory ? "spin" : ""} size={18} />
                 <span>{isImportingHistory ? "Importing..." : "Import All History"}</span>
               </button>
@@ -1861,6 +2123,16 @@ function UsMintPage({ query }) {
         <Panel eyebrow={activeUsMintTab} title={`${activeUsMintTab} Workspace`}>
           <p className="empty-copy">Connect the confirmed order import first, then this workspace can be filled from order and release data.</p>
         </Panel>
+      ) : null}
+
+      {activeUsMintTab === "Google Sheets" ? (
+        <SpreadsheetSourceWorkspace
+          fallbackColumns={columns.releases}
+          fallbackRows={usMint.releases}
+          query={query}
+          sourceId="usMint"
+          title="US Mint Sheets"
+        />
       ) : null}
     </>
   );
@@ -1958,14 +2230,13 @@ function DellPage({ query }) {
     <>
       <TabStrip labels={["Accounts", "Orders", "Items", "Rewards", "Fulfillment", "Sales"]} />
       <KpiGrid items={dell.summary} compact />
-      <section className="content-grid wide-left">
-        <Panel eyebrow="Orders" title="Fulfillment Tracker">
-          <DataTable columns={columns.dellOrders} rows={filterRows(dell.orders, query)} />
-        </Panel>
-        <Panel eyebrow="Rewards" title="Pending Credits">
-          <DataTable columns={columns.dellRewards} rows={filterRows(dell.rewards, query)} />
-        </Panel>
-      </section>
+      <SpreadsheetSourceWorkspace
+        fallbackColumns={columns.dellOrders}
+        fallbackRows={dell.orders}
+        query={query}
+        sourceId="dell"
+        title="Dell Sheets"
+      />
     </>
   );
 }
@@ -1974,9 +2245,13 @@ function CommoditiesPage({ query }) {
   return (
     <>
       <KpiGrid items={commodities.summary} compact />
-      <Panel eyebrow="Lots" title="Inventory and Sale Tracking">
-        <DataTable columns={columns.inventory} rows={filterRows(commodities.inventory, query)} />
-      </Panel>
+      <SpreadsheetSourceWorkspace
+        fallbackColumns={columns.inventory}
+        fallbackRows={commodities.inventory}
+        query={query}
+        sourceId="commodities"
+        title="Commodities Sheets"
+      />
     </>
   );
 }
@@ -2094,54 +2369,38 @@ function ReceiptsPage({ query }) {
 
 function BuyersPage({ query }) {
   return (
-    <section className="buyer-grid">
-      {filterRows(buyers, query).map((buyer) => (
-        <article className="account-card" key={buyer.name}>
-          <div className="card-heading">
-            <div>
-              <p className="eyebrow">{buyer.status}</p>
-              <h3>{buyer.name}</h3>
-            </div>
-            <span className="status-pill">{buyer.pending ? `${buyer.pending} pending` : "Pending in Supabase"}</span>
-          </div>
-          <dl className="detail-list dense">
-            <div>
-              <dt>Buys</dt>
-              <dd>{buyer.buys}</dd>
-            </div>
-            <div>
-              <dt>Last purchase</dt>
-              <dd>{buyer.lastPurchase || "—"}</dd>
-            </div>
-            <div>
-              <dt>Payment method</dt>
-              <dd>{buyer.contact}</dd>
-            </div>
-            <div>
-              <dt>Amount owed</dt>
-              <dd>{buyer.balance || "—"}</dd>
-            </div>
-          </dl>
-        </article>
-      ))}
-    </section>
+    <SpreadsheetSourceWorkspace
+      fallbackColumns={["name", "buys", "pending", "balance", "contact", "status", "lastPurchase"]}
+      fallbackRows={buyers}
+      query={query}
+      sourceId="buyers"
+      title="Buyer Sheets"
+    />
   );
 }
 
 function RewardsPage({ query }) {
   return (
-    <Panel eyebrow="Sources" title="Reward Balances">
-      <DataTable columns={columns.rewards} rows={filterRows(rewards, query)} />
-    </Panel>
+    <SpreadsheetSourceWorkspace
+      fallbackColumns={columns.rewards}
+      fallbackRows={rewards}
+      query={query}
+      sourceId="rewards"
+      title="Rewards Sheets"
+    />
   );
 }
 
 function AlertsPage({ query }) {
   return (
     <section className="content-grid wide-left">
-      <Panel eyebrow="Open actions" title="Alerts">
-        <DataTable columns={columns.alerts} rows={filterRows(alerts, query)} />
-      </Panel>
+      <SpreadsheetSourceWorkspace
+        fallbackColumns={columns.alerts}
+        fallbackRows={alerts}
+        query={query}
+        sourceId="alerts"
+        title="Alerts Sheets"
+      />
       <Panel eyebrow="Rules" title="Alert Types">
         <div className="rule-list">
           {alertRules.map((rule) => (
@@ -2155,28 +2414,40 @@ function AlertsPage({ query }) {
 
 function ReportsPage({ query }) {
   return (
-    <section className="report-grid">
-      {filterRows(reports, query).map((report) => (
-        <article className="portfolio-card" key={report.name}>
-          <div className="card-heading">
-            <div>
-              <p className="eyebrow">{report.status}</p>
-              <h3>{report.name}</h3>
-            </div>
-            <span className="portfolio-value">{report.metric || "—"}</span>
-          </div>
-          <p className="card-note">{report.action}</p>
-        </article>
-      ))}
-    </section>
+    <SpreadsheetSourceWorkspace
+      fallbackColumns={["name", "metric", "status", "action"]}
+      fallbackRows={reports}
+      query={query}
+      sourceId="reports"
+      title="Report Sheets"
+    />
   );
 }
 
-function SettingsPage({ query }) {
+function SettingsPage({ googleOAuthDisabled, onToggleGoogleOAuthDisabled, query }) {
   return (
-    <Panel eyebrow="Import sources" title="Sync Plan">
-      <DataTable columns={columns.settings} rows={filterRows(syncSettings, query)} />
-    </Panel>
+    <section className="content-grid wide-left">
+      <Panel eyebrow="Global controls" title="Connection Settings">
+        <div className="settings-control-row">
+          <div>
+            <strong>Disable Google OAuth client</strong>
+            <p>Blocks Gmail OAuth connection and Gmail imports from Costco and US Mint. Google Sheets service-account reads and writes stay available.</p>
+          </div>
+          <label className="toggle-control">
+            <input
+              checked={googleOAuthDisabled}
+              onChange={(event) => onToggleGoogleOAuthDisabled(event.target.checked)}
+              type="checkbox"
+            />
+            <span>{googleOAuthDisabled ? "Disabled" : "Enabled"}</span>
+          </label>
+        </div>
+      </Panel>
+
+      <Panel eyebrow="Import sources" title="Sync Plan">
+        <DataTable columns={columns.settings} rows={filterRows(syncSettings, query)} />
+      </Panel>
+    </section>
   );
 }
 
@@ -2202,7 +2473,7 @@ function buildProfileSnapshot(session) {
   };
 
   return {
-    badges: ["Active operator", "Private dashboard", "Gmail and Sheets ready"],
+    badges: ["Active operator", "Private dashboard", "Sheets-first data"],
     initials: getInitials(name),
     name,
     summary: `${role} for retail, travel, collectibles, rewards, buyers, receipts, and alerts.`,
