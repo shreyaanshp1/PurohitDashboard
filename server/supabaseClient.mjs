@@ -457,7 +457,11 @@ function toNumericId(value) {
 
 export function supabaseUrl() {
   const url = process.env.SUPABASE_URL;
-  if (!url) throw new Error("Missing SUPABASE_URL.");
+  if (!url) {
+    throw supabaseConfigError(
+      "Supabase is not configured. Set SUPABASE_URL in .env.local, then restart npm run dev."
+    );
+  }
   return url.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
 }
 
@@ -468,10 +472,12 @@ function supabaseServerKey() {
   if (serverKey) return serverKey;
 
   if (candidates.length) {
-    throw new Error("Configured Supabase key is publishable/anon. Use SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY.");
+    throw supabaseConfigError("Configured Supabase key is publishable/anon. Use SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY.");
   }
 
-  throw new Error("Missing SUPABASE_SECRET_KEY.");
+  throw supabaseConfigError(
+    "Supabase service key is not configured. Set SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEY in .env.local, then restart npm run dev."
+  );
 }
 
 export function supabaseHeaders(options = {}) {
@@ -521,4 +527,11 @@ function getJwtRole(key) {
   } catch {
     return null;
   }
+}
+
+function supabaseConfigError(message) {
+  const error = new Error(message);
+  error.code = "SUPABASE_NOT_CONFIGURED";
+  error.statusCode = 503;
+  return error;
 }

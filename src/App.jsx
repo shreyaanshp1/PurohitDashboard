@@ -24,6 +24,7 @@ import {
   Settings,
   ShoppingCart,
   Trash2,
+  UserRound,
   UserPlus,
   Users,
   X
@@ -88,6 +89,7 @@ import {
 const iconMap = {
   home: Home,
   costco: ShoppingCart,
+  profile: UserRound,
   travel: Plane,
   usMint: Gem,
   dell: Factory,
@@ -314,7 +316,7 @@ function App() {
 
       <main className="main-content">
         <Header title={pageTitle} activePage={activePage} query={query} setQuery={setQuery} />
-        <Page activePage={activePage} setActivePage={setActivePage} query={query} />
+        <Page activePage={activePage} setActivePage={setActivePage} query={query} session={session} />
       </main>
     </div>
   );
@@ -636,7 +638,7 @@ function Header({ title, activePage, query, setQuery }) {
   return (
     <section className="page-header">
       <div>
-        <p className="eyebrow">{activePage === "home" ? "Command center" : "Dashboard"}</p>
+        <p className="eyebrow">{activePage === "home" ? "Command center" : activePage === "profile" ? "Profile" : "Dashboard"}</p>
         <h2>{activePage === "home" ? "Santosh Portfolio Command Center" : title}</h2>
       </div>
       <div className="header-tools">
@@ -654,8 +656,9 @@ function Header({ title, activePage, query, setQuery }) {
   );
 }
 
-function Page({ activePage, setActivePage, query }) {
+function Page({ activePage, setActivePage, query, session }) {
   if (activePage === "home") return <HomePage setActivePage={setActivePage} query={query} />;
+  if (activePage === "profile") return <ProfilePage query={query} session={session} setActivePage={setActivePage} />;
   if (activePage === "costco") return <CostcoPage query={query} />;
   if (activePage === "travel") return <TravelPage query={query} />;
   if (activePage === "usMint") return <UsMintPage query={query} />;
@@ -717,6 +720,143 @@ function HomePage({ setActivePage, query }) {
         <FloatingActionButton label="Log a purchase" onClick={() => setIsPurchaseLoggerOpen(true)} />
       ) : null}
     </>
+  );
+}
+
+function ProfilePage({ query, session, setActivePage }) {
+  const snapshot = useMemo(() => buildProfileSnapshot(session), [session]);
+  const visibleStats = filterRows(snapshot.statCards, query);
+  const visiblePortfolios = filterRows(snapshot.portfolioItems, query);
+  const visibleTimeline = filterRows(snapshot.timelineItems, query);
+
+  return (
+    <>
+      <section className="profile-hero">
+        <div className="profile-identity">
+          <span className="profile-avatar">{snapshot.initials}</span>
+          <div className="profile-copy">
+            <p className="eyebrow">Operator profile</p>
+            <h3>{snapshot.name}</h3>
+            <p>{snapshot.summary}</p>
+            <div className="profile-badge-row">
+              {snapshot.badges.map((badge) => (
+                <span className="status-pill muted" key={badge}>
+                  {badge}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <dl className="profile-social-stats">
+          {snapshot.socialStats.map((stat) => (
+            <div key={stat.label}>
+              <dt>{stat.label}</dt>
+              <dd>{stat.value}</dd>
+              <small>{stat.detail}</small>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      <section className="profile-stat-grid">
+        {visibleStats.map((item) => (
+          <ProfileStatCard item={item} key={item.label} />
+        ))}
+        {visibleStats.length ? null : <p className="empty-copy">No matching profile stats</p>}
+      </section>
+
+      <section className="content-grid wide-left">
+        <Panel eyebrow="Portfolio footprint" title="Dashboards Owned" aside={`${visiblePortfolios.length} areas`}>
+          <ProfilePortfolioList items={visiblePortfolios} setActivePage={setActivePage} />
+        </Panel>
+
+        <Panel eyebrow="Account health" title="Priority Signals">
+          <dl className="reward-rule-list profile-health-list">
+            {snapshot.healthSignals.map((signal) => (
+              <div key={signal.label}>
+                <dt>{signal.label}</dt>
+                <dd>{signal.value}</dd>
+                <small>{signal.detail}</small>
+              </div>
+            ))}
+          </dl>
+        </Panel>
+      </section>
+
+      <section className="content-grid two-column">
+        <Panel eyebrow="Activity" title="Profile Highlights" aside={`${visibleTimeline.length} signals`}>
+          <ProfileTimeline items={visibleTimeline} />
+        </Panel>
+
+        <Panel eyebrow="Network" title="Buyer and Reward Coverage">
+          <RelationshipList items={snapshot.coverageItems} />
+        </Panel>
+      </section>
+    </>
+  );
+}
+
+function ProfileStatCard({ item }) {
+  const Icon = item.icon;
+
+  return (
+    <article className={`profile-stat-card tone-${item.tone}`}>
+      <span className={`profile-stat-icon tone-${item.tone}`}>
+        <Icon size={19} />
+      </span>
+      <p>{item.label}</p>
+      <strong>{item.value}</strong>
+      <span>{item.detail}</span>
+    </article>
+  );
+}
+
+function ProfilePortfolioList({ items, setActivePage }) {
+  if (!items.length) return <p className="empty-copy">No matching portfolio areas</p>;
+
+  return (
+    <div className="profile-portfolio-list">
+      {items.map((item) => {
+        const Icon = iconMap[item.id] || Package;
+
+        return (
+          <button className="profile-portfolio-row" key={item.id} onClick={() => setActivePage(item.id)} type="button">
+            <span className={`profile-portfolio-icon tone-${item.tone}`}>
+              <Icon size={18} />
+            </span>
+            <span className="profile-portfolio-body">
+              <strong>{item.name}</strong>
+              <small>{item.detail}</small>
+            </span>
+            <span className="profile-portfolio-value">
+              <strong>{item.value}</strong>
+              <small>{item.nextAction}</small>
+              <ArrowRight size={16} />
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProfileTimeline({ items }) {
+  if (!items.length) return <p className="empty-copy">No matching profile highlights</p>;
+
+  return (
+    <div className="profile-timeline">
+      {items.map((item) => (
+        <div className="profile-timeline-row" key={`${item.source}-${item.event}`}>
+          <span className={`priority-dot ${item.priority}`} />
+          <div>
+            <strong>{item.source}</strong>
+            <p>{item.event}</p>
+          </div>
+          <span className="table-pill">{item.status}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -2038,6 +2178,214 @@ function SettingsPage({ query }) {
       <DataTable columns={columns.settings} rows={filterRows(syncSettings, query)} />
     </Panel>
   );
+}
+
+function buildProfileSnapshot(session) {
+  const name = session?.name || "Santosh Purohit";
+  const role = session?.role || "Portfolio operator";
+  const activeCostcoAccounts = costcoAccounts.filter((account) => account.status === "Active");
+  const executiveCostcoAccounts = activeCostcoAccounts.filter((account) => account.executive === "Yes");
+  const activeUsMintAccounts = usMintAccounts.filter((account) => account.status === "Active");
+  const totalProfiles = costcoAccounts.length + usMintAccounts.length;
+  const totalCostcoRewards = costcoRewardRows.reduce((total, row) => total + (Number(row.rewardAmount) || 0), 0);
+  const rewardProgress = costcoRewardRows.length
+    ? Math.round(costcoRewardRows.reduce((total, row) => total + (Number(row.progress) || 0), 0) / costcoRewardRows.length)
+    : 0;
+  const renewalRemindersDue = costcoRenewalReminders.filter((reminder) => reminder.isVisible);
+  const verificationCount = costcoAccounts.filter((account) => account.needsVerification === "Yes").length;
+  const nextRenewal = costcoRenewalReminders[0];
+
+  const profileContext = {
+    activeCostcoAccounts,
+    activeUsMintAccounts,
+    totalCostcoRewards
+  };
+
+  return {
+    badges: ["Active operator", "Private dashboard", "Gmail and Sheets ready"],
+    initials: getInitials(name),
+    name,
+    summary: `${role} for retail, travel, collectibles, rewards, buyers, receipts, and alerts.`,
+    socialStats: [
+      { label: "Portfolios", value: String(portfolioCards.length), detail: "core dashboards" },
+      { label: "Profiles", value: String(totalProfiles), detail: "account records" },
+      { label: "Rewards", value: formatCurrency(totalCostcoRewards), detail: "Costco tracked" },
+      { label: "Buyers", value: String(buyers.length), detail: "network rows" }
+    ],
+    statCards: [
+      {
+        detail: `${executiveCostcoAccounts.length} Executive reward accounts`,
+        icon: ShoppingCart,
+        label: "Costco Memberships",
+        tone: "blue",
+        value: String(activeCostcoAccounts.length)
+      },
+      {
+        detail: "Active purchase profiles",
+        icon: Gem,
+        label: "US Mint Accounts",
+        tone: "green",
+        value: String(activeUsMintAccounts.length)
+      },
+      {
+        detail: `${rewardProgress}% average reward-cap progress`,
+        icon: BarChart3,
+        label: "Rewards Tracked",
+        tone: "violet",
+        value: formatCurrency(totalCostcoRewards)
+      },
+      {
+        detail: nextRenewal ? `Next window: ${nextRenewal.renewalDate}` : "No renewal dates loaded",
+        icon: Bell,
+        label: "Renewals Due",
+        tone: renewalRemindersDue.length ? "rose" : "amber",
+        value: String(renewalRemindersDue.length)
+      },
+      {
+        detail: "Active sales coverage",
+        icon: Users,
+        label: "Buyer Network",
+        tone: "green",
+        value: String(buyers.length)
+      },
+      {
+        detail: `${alertRules.length} alert rule types configured`,
+        icon: Bell,
+        label: "Open Alerts",
+        tone: "rose",
+        value: String(alerts.length)
+      },
+      {
+        detail: "Costco account records to verify",
+        icon: UserRound,
+        label: "Verification Queue",
+        tone: verificationCount ? "amber" : "green",
+        value: String(verificationCount)
+      },
+      {
+        detail: "Gmail, Sheets, and upload sources",
+        icon: RefreshCw,
+        label: "Sync Sources",
+        tone: "neutral",
+        value: String(syncSettings.length)
+      }
+    ],
+    portfolioItems: portfolioCards.map((portfolio) => ({
+      ...portfolio,
+      detail: getProfilePortfolioDetail(portfolio.id),
+      value: getProfilePortfolioValue(portfolio.id, profileContext)
+    })),
+    healthSignals: [
+      {
+        detail: nextRenewal ? `${nextRenewal.account} · ${nextRenewal.membership}` : "No Costco renewal rows loaded",
+        label: "Next Renewal",
+        value: nextRenewal?.renewalDate || "—"
+      },
+      {
+        detail: `${COSTCO_RENEWAL_REMINDER_PHONE} reminder destination`,
+        label: "Renewal Alerts",
+        value: String(renewalRemindersDue.length)
+      },
+      {
+        detail: `${formatCurrency(COSTCO_EXECUTIVE_REWARD_CAP)} max per cycle`,
+        label: "Reward Progress",
+        value: `${rewardProgress}%`
+      },
+      {
+        detail: "Manual review before acting",
+        label: "Needs Verification",
+        value: String(verificationCount)
+      }
+    ],
+    timelineItems: [
+      {
+        event: `${activeCostcoAccounts.length} active Costco memberships mapped across household and primary profiles`,
+        priority: "low",
+        source: "Costco",
+        status: "Mapped"
+      },
+      {
+        event: `${formatCurrency(totalCostcoRewards)} estimated Executive rewards across ${executiveCostcoAccounts.length} accounts`,
+        priority: "medium",
+        source: "Rewards",
+        status: "Tracking"
+      },
+      {
+        event: `${activeUsMintAccounts.length} US Mint profiles ready for order and release history`,
+        priority: "low",
+        source: "US Mint",
+        status: "Ready"
+      },
+      {
+        event: `${alerts.length} open action items with ${alertRules.length} configured alert types`,
+        priority: alerts.length ? "high" : "low",
+        source: "Alerts",
+        status: alerts.length ? "Review" : "Clear"
+      },
+      ...recentActivity.map((activity) => ({
+        event: activity.event,
+        priority: "low",
+        source: activity.source,
+        status: activity.status || "Ready"
+      }))
+    ],
+    coverageItems: [
+      {
+        account: `${buyers.length} buyer rows`,
+        household: buyers.map((buyer) => buyer.name).join(", "),
+        note: "Sales and payment coverage",
+        primary: "Buyer Network"
+      },
+      {
+        account: formatCurrency(totalCostcoRewards),
+        household: `${executiveCostcoAccounts.length} active Executive accounts`,
+        note: `${formatCurrency(COSTCO_EXECUTIVE_REWARD_CAP)} cap per account cycle`,
+        primary: "Costco Rewards"
+      },
+      {
+        account: `${syncSettings.length} sources`,
+        household: syncSettings.map((setting) => setting.source).join(", "),
+        note: "Sync plan coverage",
+        primary: "Data Sources"
+      }
+    ]
+  };
+}
+
+function getProfilePortfolioValue(id, context) {
+  const values = {
+    commodities: `${commodities.inventory.length} lots`,
+    costco: String(context.activeCostcoAccounts.length),
+    dell: `${dell.rewards.length} rewards`,
+    travel: String(travelSheetNames.length),
+    usMint: String(context.activeUsMintAccounts.length)
+  };
+
+  return values[id] || "—";
+}
+
+function getProfilePortfolioDetail(id) {
+  const details = {
+    commodities: "Bullion and collectible inventory readiness",
+    costco: "Memberships, renewals, rewards, and Gmail orders",
+    dell: "Orders, rewards, fulfillment, and sale follow-up",
+    travel: "Trips, flights, awards, and master reference data",
+    usMint: "Accounts, confirmed orders, releases, and subscriptions"
+  };
+
+  return details[id] || "Portfolio workspace";
+}
+
+function getInitials(name) {
+  const initials = String(name || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  return initials || "SP";
 }
 
 function KpiGrid({ items, compact = false }) {
