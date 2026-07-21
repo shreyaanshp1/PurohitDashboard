@@ -27,7 +27,7 @@ VITE_DEMO_NAME=Local Admin
 
 Restart `npm run dev` after changing `.env.local`.
 
-Security note: Vite exposes `VITE_*` values to browser code. Do not rely on local demo credentials to protect a public deployment. Public deployments should use Supabase auth records and avoid enabling the local fallback.
+Security note: Vite exposes `VITE_*` values to browser code. The Vite config only injects these demo credentials while running the local dev server; production builds blank them out. Do not rely on local demo credentials to protect a public deployment. Public deployments should use the private auth API and Supabase auth records.
 
 ## Useful Scripts
 
@@ -87,6 +87,14 @@ Then add this GitHub repository variable under `Settings > Secrets and variables
 ```txt
 VITE_TRAVEL_MASTER_DATA_ENDPOINT=https://YOUR_PROJECT_REF.supabase.co/functions/v1/travel-master-data
 ```
+
+For deployed sign-in, also set one browser-safe backend URL as a repository variable:
+
+```txt
+VITE_AUTH_ENDPOINT=https://YOUR_PRIVATE_API_HOST/api/auth
+```
+
+If the same backend already exposes purchases at `/api/purchases`, you can set `VITE_PURCHASE_LOG_ENDPOINT` instead and the app will derive `/api/auth` from it. Do not put `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, Google service-account JSON, or demo passwords in `VITE_*` variables or GitHub Pages build variables.
 
 ## Current Scope
 

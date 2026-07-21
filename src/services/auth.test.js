@@ -25,7 +25,7 @@ test("local fallback is disabled unless credentials are configured", async () =>
   await withAuthEnv({}, async () => {
     await assert.rejects(
       signInWithSupabase({ username: "demo", password: "old-public-password" }),
-      /local demo credentials are disabled/
+      /Auth is not configured/
     );
   });
 });
@@ -44,6 +44,46 @@ test("local fallback accepts credentials from environment", async () => {
       signInWithSupabase({ username: "demo", password: "old-public-password" }),
       /Invalid username or password/
     );
+  });
+});
+
+test("localhost auth API failures can fall back to private demo credentials", async () => {
+  await withAuthEnv({ DEMO_USERNAME: "private-admin", DEMO_PASSWORD: "private-password", DEMO_NAME: "Private Admin" }, async () => {
+    const previousFetch = globalThis.fetch;
+    const previousWindow = globalThis.window;
+    const storage = new Map();
+
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ error: "Supabase service key is not configured." })
+    });
+    globalThis.window = {
+      location: { hostname: "127.0.0.1" },
+      localStorage: {
+        getItem: (key) => storage.get(key) || null,
+        removeItem: (key) => storage.delete(key),
+        setItem: (key, value) => storage.set(key, value)
+      }
+    };
+
+    try {
+      const session = await signInWithSupabase({ username: "private-admin", password: "private-password" });
+
+      assert.deepEqual(session, {
+        username: "private-admin",
+        name: "Private Admin",
+        role: "admin"
+      });
+      assert.match(storage.get("portfolio-auth"), /Private Admin/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousWindow === undefined) {
+        delete globalThis.window;
+      } else {
+        globalThis.window = previousWindow;
+      }
+    }
   });
 });
 

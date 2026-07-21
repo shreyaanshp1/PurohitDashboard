@@ -1,10 +1,8 @@
-const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
-
-const CONFIGURED_PURCHASE_ENDPOINT = env.VITE_PURCHASE_LOG_ENDPOINT || "";
+const CONFIGURED_PURCHASE_ENDPOINT = import.meta.env?.VITE_PURCHASE_LOG_ENDPOINT || "";
 const PURCHASE_ENDPOINT = CONFIGURED_PURCHASE_ENDPOINT || "/api/purchases";
 const API_ROOT = PURCHASE_ENDPOINT.replace(/\/purchases\/?$/, "") || "/api";
-const TRAVEL_SHEETS_ENDPOINT = trimTrailingSlash(env.VITE_TRAVEL_SHEETS_ENDPOINT || "");
-const TRAVEL_MASTER_DATA_ENDPOINT = env.VITE_TRAVEL_MASTER_DATA_ENDPOINT || "";
+const TRAVEL_SHEETS_ENDPOINT = trimTrailingSlash(import.meta.env?.VITE_TRAVEL_SHEETS_ENDPOINT || "");
+const TRAVEL_MASTER_DATA_ENDPOINT = import.meta.env?.VITE_TRAVEL_MASTER_DATA_ENDPOINT || "";
 const IS_GITHUB_PAGES = typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
 const HAS_PURCHASE_BACKEND = Boolean(CONFIGURED_PURCHASE_ENDPOINT || !IS_GITHUB_PAGES);
 const GMAIL_BACKEND_UNCONFIGURED_MESSAGE = "Gmail import backend is not configured for this GitHub Pages deployment.";

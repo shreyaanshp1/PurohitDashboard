@@ -3459,6 +3459,10 @@ function parseTravelDate(value) {
   return new Date(year, Number(slashMatch[1]) - 1, Number(slashMatch[2]));
 }
 
+function startOfDay(value) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
 function isLongTravelField(header) {
   return /notes?|description|details?|comments?/i.test(header);
 }

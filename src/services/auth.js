@@ -1,10 +1,16 @@
 import { generateTwoFactorCode, hashPassword, verifyTwoFactorCode } from "./password.js";
 
 const AUTH_STORAGE_KEY = "portfolio-auth";
-const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
 const DEFAULT_LOCAL_AUTH_NAME = "Local Admin";
-const CONFIGURED_AUTH_ENDPOINT = trimTrailingSlash(env.VITE_AUTH_ENDPOINT || "");
-const CONFIGURED_PURCHASE_ENDPOINT = env.VITE_PURCHASE_LOG_ENDPOINT || "";
+const CONFIGURED_AUTH_ENDPOINT = trimTrailingSlash(import.meta.env?.VITE_AUTH_ENDPOINT || "");
+const CONFIGURED_PURCHASE_ENDPOINT = import.meta.env?.VITE_PURCHASE_LOG_ENDPOINT || "";
+const DEV_DEMO_USERNAME = typeof __DEV_DEMO_USERNAME__ !== "undefined" ? __DEV_DEMO_USERNAME__ : "";
+const DEV_DEMO_PASSWORD = typeof __DEV_DEMO_PASSWORD__ !== "undefined" ? __DEV_DEMO_PASSWORD__ : "";
+const DEV_DEMO_2FA_SECRET = typeof __DEV_DEMO_2FA_SECRET__ !== "undefined" ? __DEV_DEMO_2FA_SECRET__ : "";
+const DEV_DEMO_NAME = typeof __DEV_DEMO_NAME__ !== "undefined" ? __DEV_DEMO_NAME__ : "";
+const DEV_DEMO_ROLE = typeof __DEV_DEMO_ROLE__ !== "undefined" ? __DEV_DEMO_ROLE__ : "";
+const BROWSER_SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || "";
+const BROWSER_SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || "";
 const PURCHASE_ENDPOINT = CONFIGURED_PURCHASE_ENDPOINT || "/api/purchases";
 const API_ROOT = PURCHASE_ENDPOINT.replace(/\/purchases\/?$/, "") || "/api";
 const AUTH_API_ROOT = CONFIGURED_AUTH_ENDPOINT || `${API_ROOT}/auth`;
@@ -42,15 +48,18 @@ export async function signInWithSupabase({ username, password, otp }) {
 
   const normalizedUsername = String(username).trim().toLowerCase();
   const localUser = localAuthUser();
-  if (!hasSupabaseConfig() && localUser) {
-    return signInWithLocalFallback({ username: normalizedUsername, password, otp });
-  }
 
   if (shouldUseAuthApi()) {
-    const result = await postAuthJson("signin", { username: normalizedUsername, password, otp });
-    const session = result.session;
-    persistAuthSession(session);
-    return session;
+    try {
+      const result = await postAuthJson("signin", { username: normalizedUsername, password, otp });
+      const session = result.session;
+      persistAuthSession(session);
+      return session;
+    } catch (error) {
+      if (!shouldUseLocalAuthFallback(error, localUser)) {
+        throw error;
+      }
+    }
   }
 
   if (!hasSupabaseConfig()) {
@@ -182,7 +191,7 @@ function matchesPassword(password, hash) {
 function signInWithLocalFallback({ username, password, otp }) {
   const localUser = localAuthUser();
   if (!localUser) {
-    throw new Error("Supabase is not configured and local demo credentials are disabled. Configure Supabase or set VITE_DEMO_USERNAME and VITE_DEMO_PASSWORD in .env.local.");
+    throw new Error(authConfigurationMessage());
   }
 
   const normalizedUsername = String(username || "").trim().toLowerCase();
@@ -205,23 +214,28 @@ function signInWithLocalFallback({ username, password, otp }) {
 }
 
 function localAuthUser() {
-  const username = localAuthValue("VITE_DEMO_USERNAME", "DEMO_USERNAME").trim().toLowerCase();
-  const password = localAuthValue("VITE_DEMO_PASSWORD", "DEMO_PASSWORD");
+  const username = localAuthValue(DEV_DEMO_USERNAME, "DEMO_USERNAME").trim().toLowerCase();
+  const password = localAuthValue(DEV_DEMO_PASSWORD, "DEMO_PASSWORD");
   if (!username || !password.trim()) return null;
 
-  const twoFactorSecret = localAuthValue("VITE_DEMO_2FA_SECRET", "DEMO_2FA_SECRET").trim();
+  const twoFactorSecret = localAuthValue(DEV_DEMO_2FA_SECRET, "DEMO_2FA_SECRET").trim();
   return {
     username,
-    name: localAuthValue("VITE_DEMO_NAME", "DEMO_NAME").trim() || DEFAULT_LOCAL_AUTH_NAME,
+    name: localAuthValue(DEV_DEMO_NAME, "DEMO_NAME").trim() || DEFAULT_LOCAL_AUTH_NAME,
     password_hash: hashPassword(password.trim()),
     two_factor_enabled: Boolean(twoFactorSecret),
     two_factor_secret: twoFactorSecret,
-    role: localAuthValue("VITE_DEMO_ROLE", "DEMO_ROLE").trim() || "admin"
+    role: localAuthValue(DEV_DEMO_ROLE, "DEMO_ROLE").trim() || "admin"
   };
 }
 
-function localAuthValue(viteKey, processKey) {
-  return env[viteKey] || (typeof process !== "undefined" && process.env ? process.env[processKey] : "") || "";
+function localAuthValue(viteValue, processKey) {
+  return viteValue || localProcessAuthValue(processKey);
+}
+
+function localProcessAuthValue(processKey) {
+  if (typeof process === "undefined" || !process.env) return "";
+  return process.env[processKey] || process.env[`VITE_${processKey}`] || "";
 }
 
 function hasSupabaseConfig() {
@@ -229,12 +243,12 @@ function hasSupabaseConfig() {
 }
 
 function supabaseUrl() {
-  const url = env.VITE_SUPABASE_URL || (typeof process !== "undefined" && process.env ? process.env.SUPABASE_URL : "") || "";
+  const url = BROWSER_SUPABASE_URL || (typeof process !== "undefined" && process.env ? process.env.SUPABASE_URL : "") || "";
   return url.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
 }
 
 function supabaseAnonKey() {
-  return env.VITE_SUPABASE_ANON_KEY || (typeof process !== "undefined" && process.env ? process.env.SUPABASE_ANON_KEY : "") || "";
+  return BROWSER_SUPABASE_ANON_KEY || (typeof process !== "undefined" && process.env ? process.env.SUPABASE_ANON_KEY : "") || "";
 }
 
 function supabaseHeaders() {
@@ -268,7 +282,9 @@ async function postAuthJson(path, payload) {
   const body = parseJsonResponse(text, response);
 
   if (!response.ok || body?.success === false) {
-    throw new Error(body?.error || body?.message || `Auth request failed with status ${response.status}.`);
+    const error = new Error(body?.error || body?.message || `Auth request failed with status ${response.status}.`);
+    error.statusCode = response.status;
+    throw error;
   }
 
   return body;
@@ -290,6 +306,27 @@ function shouldUseAuthApi() {
   if (typeof window === "undefined") return false;
   if (CONFIGURED_AUTH_ENDPOINT || CONFIGURED_PURCHASE_ENDPOINT) return true;
   return !window.location.hostname.endsWith("github.io");
+}
+
+function shouldUseLocalAuthFallback(error, localUser) {
+  if (!localUser || !isLocalBrowser()) return false;
+  if (CONFIGURED_AUTH_ENDPOINT || CONFIGURED_PURCHASE_ENDPOINT) return false;
+
+  const message = String(error?.message || "");
+  return [401, 503].includes(error?.statusCode) || /Failed to fetch|NetworkError|Auth API returned HTML|status 404|status 502|status 503/i.test(message);
+}
+
+function isLocalBrowser() {
+  if (typeof window === "undefined") return false;
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname);
+}
+
+function authConfigurationMessage() {
+  if (typeof window !== "undefined" && window.location.hostname.endsWith("github.io")) {
+    return "Auth backend is not configured for this deployment. Set GitHub repository variables VITE_AUTH_ENDPOINT or VITE_PURCHASE_LOG_ENDPOINT to your private backend URL, then redeploy.";
+  }
+
+  return "Auth is not configured in this frontend. Restart npm run dev after setting local demo credentials in .env.local, or configure VITE_AUTH_ENDPOINT.";
 }
 
 function trimTrailingSlash(value) {

@@ -1,10 +1,8 @@
-const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : {};
-
-const APPS_SCRIPT_URL = env.VITE_GOOGLE_SHEETS_WEB_APP_URL || "";
-const BACKEND_ENDPOINT = env.VITE_PURCHASE_LOG_ENDPOINT || "";
-const SHEET_ID = env.VITE_GOOGLE_SHEET_ID || "";
-const SHEET_NAME = env.VITE_GOOGLE_SHEET_NAME || "Purchases";
-const SHARED_SECRET = env.VITE_GOOGLE_SHEETS_SHARED_SECRET || "";
+const APPS_SCRIPT_URL = import.meta.env?.VITE_GOOGLE_SHEETS_WEB_APP_URL || "";
+const BACKEND_ENDPOINT = import.meta.env?.VITE_PURCHASE_LOG_ENDPOINT || "";
+const SHEET_ID = import.meta.env?.VITE_GOOGLE_SHEET_ID || "";
+const SHEET_NAME = import.meta.env?.VITE_GOOGLE_SHEET_NAME || "Purchases";
+const SHARED_SECRET = import.meta.env?.VITE_GOOGLE_SHEETS_SHARED_SECRET || "";
 
 export const PURCHASE_COLUMNS = [
   "Date",
