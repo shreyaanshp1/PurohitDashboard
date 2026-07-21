@@ -86,6 +86,29 @@ export async function appendRowToSheet({ spreadsheetId, sheetName, values, range
   };
 }
 
+export async function updateRowInSheet({ spreadsheetId, sheetName, rowNumber, values }) {
+  const accessToken = await getAccessToken(SHEETS_WRITE_SCOPE);
+  const safeRowNumber = Number.parseInt(rowNumber, 10);
+
+  if (!Number.isFinite(safeRowNumber) || safeRowNumber < 2) {
+    throw new Error("A valid spreadsheet row number is required.");
+  }
+
+  const lastColumn = columnName(values.length || 1);
+  const encodedRange = encodeURIComponent(`${quoteSheetName(sheetName)}!A${safeRowNumber}:${lastColumn}${safeRowNumber}`);
+  const response = await fetch(`${SHEETS_API_BASE}/${spreadsheetId}/values/${encodedRange}?valueInputOption=USER_ENTERED`, {
+    method: "PUT",
+    headers: authJsonHeaders(accessToken),
+    body: JSON.stringify({ values: [values] })
+  });
+  const data = await parseGoogleResponse(response);
+
+  return {
+    success: true,
+    updatedRange: data.updatedRange
+  };
+}
+
 async function ensureSheetExists({ accessToken, spreadsheetId, sheetName }) {
   const url = `${SHEETS_API_BASE}/${spreadsheetId}?fields=sheets.properties.title`;
   const response = await fetch(url, { headers: authHeaders(accessToken) });
@@ -217,6 +240,19 @@ function base64url(value) {
 
 function quoteSheetName(sheetName) {
   return `'${sheetName.replace(/'/g, "''")}'`;
+}
+
+function columnName(index) {
+  let value = Math.max(Number(index) || 1, 1);
+  let name = "";
+
+  while (value > 0) {
+    value -= 1;
+    name = String.fromCharCode(65 + (value % 26)) + name;
+    value = Math.floor(value / 26);
+  }
+
+  return name;
 }
 
 function authHeaders(accessToken) {

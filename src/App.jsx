@@ -40,10 +40,10 @@ import {
   buyers,
   COSTCO_EXECUTIVE_REWARD_CAP,
   COSTCO_EXECUTIVE_REWARD_RATE,
+  COSTCO_RENEWAL_REMINDER_LEAD_DAYS,
   COSTCO_RENEWAL_REMINDER_PHONE,
   commodities,
   costco,
-  costcoAccountDetailGroups,
   costcoAccounts,
   costcoManualPulls,
   costcoRenewalReminders,
@@ -77,7 +77,8 @@ import {
   listTravelSheets,
   listUsMintOrders,
   listReceiptFolders,
-  listReceipts
+  listReceipts,
+  updateSpreadsheetSourceRow
 } from "./services/purchaseLog.js";
 import {
   clearAuthSession,
@@ -109,6 +110,7 @@ const columns = {
   costcoCombinedOrders: ["source", "status", "order", "membership", "item", "itemNumber", "quantity", "subtotal", "tax", "total", "date", "action"],
   costcoRewards: ["account", "membership", "reward", "remaining", "spendNeeded", "cycleStart", "cycleEnd", "updated", "status"],
   costcoRenewals: ["status", "account", "membership", "role", "renewalDate", "reminderDate", "expirationDate", "daysUntil", "priority", "action"],
+  costcoTransactions: ["date", "account", "membership", "item", "quantity", "subtotal", "tax", "total", "status", "action"],
   usMintOrders: ["status", "order", "item", "unitType", "quantity", "subtotal", "total", "date", "action"],
   releases: ["release", "date", "accounts", "quantity", "charge", "buyer", "action"],
   subscriptions: ["account", "items", "card", "address", "status"],
@@ -120,7 +122,7 @@ const columns = {
   settings: ["source", "query", "status", "cadence"]
 };
 
-const costcoTabs = ["Accounts", "Email Orders", "Manual Pulls", "Combined Table", "Rewards Planner", "Renewals", "Google Sheets"];
+const costcoTabs = ["Accounts", "Transactions", "Rewards Planner", "Renewals", "Google Sheets", "Gmail Import"];
 const costcoSortableOrderColumns = ["status", "item", "date"];
 const travelSheetNames = ["Trips", "Flights", "Certificates_Awards"];
 const travelMasterDataSheetNames = [
@@ -156,6 +158,7 @@ const googleOAuthMessageType = "google-oauth-complete";
 const googleOAuthPopupFeatures = "popup=yes,width=520,height=720,left=160,top=80";
 const googleOAuthWaitMs = 120000;
 const googleOAuthDisabledStorageKey = "portfolio-google-oauth-disabled";
+const costcoAccountEditStorageKey = "portfolio-costco-account-edits";
 
 async function connectGoogleOAuth({ googleOAuthDisabled = false, notifyError, notifySuccess, setGoogleStatus }) {
   if (googleOAuthDisabled) {
@@ -714,13 +717,15 @@ function Page({ activePage, googleOAuthDisabled, onToggleGoogleOAuthDisabled, se
 
 function HomePage({ setActivePage, query }) {
   const [isPurchaseLoggerOpen, setIsPurchaseLoggerOpen] = useState(false);
+  const homeSummaryItems = useMemo(() => buildHomeSummaryItems(), []);
 
   return (
     <>
-      <KpiGrid items={homeKpis} />
+      <KpiGrid items={homeSummaryItems} />
       {isPurchaseLoggerOpen ? (
         <PurchaseLoggerModal onClose={() => setIsPurchaseLoggerOpen(false)} />
       ) : null}
+      <CostcoHomePanel setActivePage={setActivePage} />
       <section className="portfolio-grid">
         {portfolioCards.map((portfolio) => (
           <article className={`portfolio-card tone-${portfolio.tone}`} key={portfolio.id}>
@@ -760,6 +765,52 @@ function HomePage({ setActivePage, query }) {
         <FloatingActionButton label="Log a purchase" onClick={() => setIsPurchaseLoggerOpen(true)} />
       ) : null}
     </>
+  );
+}
+
+function CostcoHomePanel({ setActivePage }) {
+  const priorityAccounts = getCostcoPriorityAccounts(costcoAccounts, 2);
+
+  return (
+    <section className="home-priority-panel">
+      <Panel
+        eyebrow="Costco priority"
+        title="Renewals and Rewards"
+        aside={`${formatCurrency(costcoRewardRows.reduce((total, row) => total + (row.spendNeededAmount || 0), 0))} spend needed`}
+      >
+        <div className="home-costco-priority">
+          <div className="home-costco-metrics">
+            <div>
+              <span>Total Rewards Earned</span>
+              <strong>{formatCurrency(costcoRewardRows.reduce((total, row) => total + (row.rewardAmount || 0), 0))}</strong>
+            </div>
+            <div>
+              <span>Spend Needed To Cap</span>
+              <strong>{formatCurrency(costcoRewardRows.reduce((total, row) => total + (row.spendNeededAmount || 0), 0))}</strong>
+            </div>
+          </div>
+
+          <div className="home-costco-account-list">
+            {priorityAccounts.map((account) => (
+              <div className={`home-costco-account status-row-${costcoStatusTone(account)}`} key={account.id}>
+                <div>
+                  <strong>{account.ownerName || "Unknown owner"}</strong>
+                  <span>
+                    {account.membershipNumber || "Pending"} · renews {account.renewalOpens || account.expirationDate || "—"}
+                  </span>
+                </div>
+                <span className={statusPillClass(account.status)}>{account.status || "Unknown"}</span>
+              </div>
+            ))}
+          </div>
+
+          <button className="text-action" onClick={() => setActivePage("costco")} type="button">
+            <span>Open Costco accounts</span>
+            <ArrowRight size={16} />
+          </button>
+        </div>
+      </Panel>
+    </section>
   );
 }
 
@@ -900,7 +951,7 @@ function ProfileTimeline({ items }) {
   );
 }
 
-function SpreadsheetSourceWorkspace({ sourceId, fallbackColumns, fallbackRows, query, title }) {
+function SpreadsheetSourceWorkspace({ sourceId, fallbackColumns, fallbackRows, preferredSheetNames = [], query, title }) {
   const sourceState = useSpreadsheetSource(sourceId);
   const [activeSheetName, setActiveSheetName] = useState("");
   const [isLogOpen, setIsLogOpen] = useState(false);
@@ -918,9 +969,12 @@ function SpreadsheetSourceWorkspace({ sourceId, fallbackColumns, fallbackRows, q
 
   useEffect(() => {
     if (!activeSheetName && sourceState.sheets[0]?.name) {
-      setActiveSheetName(sourceState.sheets[0].name);
+      const preferredSheet = sourceState.sheets.find((sheet) =>
+        preferredSheetNames.some((name) => sheet.name.toLowerCase() === name.toLowerCase())
+      );
+      setActiveSheetName((preferredSheet || sourceState.sheets[0]).name);
     }
-  }, [activeSheetName, sourceState.sheets]);
+  }, [activeSheetName, preferredSheetNames, sourceState.sheets]);
 
   return (
     <>
@@ -1111,8 +1165,9 @@ function PurchaseLoggerModal({ onClose }) {
 
 function CostcoPage({ googleOAuthDisabled, query }) {
   const [orders, setOrders] = useState([]);
-  const [activeCostcoTab, setActiveCostcoTab] = useState("Email Orders");
+  const [activeCostcoTab, setActiveCostcoTab] = useState("Accounts");
   const [selectedCostcoAccountId, setSelectedCostcoAccountId] = useState(costcoAccounts[0]?.id || "");
+  const [costcoAccountEdits, setCostcoAccountEdits] = useState(readCostcoAccountEdits);
   const [googleStatus, setGoogleStatus] = useState({ authenticated: false, configured: false });
   const [importResult, setImportResult] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -1120,6 +1175,7 @@ function CostcoPage({ googleOAuthDisabled, query }) {
   const [isImporting, setIsImporting] = useState(false);
   const [isImportingHistory, setIsImportingHistory] = useState(false);
   const { notifyError, notifySuccess } = useToast();
+  const costcoSheetSource = useSpreadsheetSource("costco");
 
   useEffect(() => {
     let isCurrent = true;
@@ -1167,16 +1223,22 @@ function CostcoPage({ googleOAuthDisabled, query }) {
     ],
     query
   );
-  const visibleCostcoAccounts = useMemo(() => filterRows(costcoAccounts, query), [query]);
+  const sheetCostcoAccounts = useMemo(() => buildCostcoAccountsFromSheetSource(costcoSheetSource), [costcoSheetSource.sheets]);
+  const sourceCostcoAccounts = sheetCostcoAccounts.length ? sheetCostcoAccounts : costcoAccounts;
+  const editableCostcoAccounts = useMemo(
+    () => sortCostcoAccounts(applyCostcoAccountEdits(sourceCostcoAccounts, costcoAccountEdits)),
+    [costcoAccountEdits, sourceCostcoAccounts]
+  );
+  const visibleCostcoAccounts = useMemo(() => filterRows(editableCostcoAccounts, query), [editableCostcoAccounts, query]);
   const visibleRenewalReminders = useMemo(() => filterRows(costcoRenewalReminders, query), [query]);
   const costcoSummaryItems = useMemo(
     () =>
       costco.summary.map((item) =>
-        item.label === "Gmail Records"
+        item.label === "Transactions"
           ? {
               ...item,
               value: String(orders.length),
-              detail: orders.length ? "Imported Gmail order rows" : "Waiting for Gmail import"
+              detail: orders.length ? "Imported transaction rows" : "Waiting for Google Sheets rows"
             }
           : item
       ),
@@ -1185,8 +1247,8 @@ function CostcoPage({ googleOAuthDisabled, query }) {
   const selectedCostcoAccount =
     visibleCostcoAccounts.find((account) => account.id === selectedCostcoAccountId) ||
     visibleCostcoAccounts[0] ||
-    costcoAccounts.find((account) => account.id === selectedCostcoAccountId) ||
-    costcoAccounts[0];
+    editableCostcoAccounts.find((account) => account.id === selectedCostcoAccountId) ||
+    editableCostcoAccounts[0];
   const orderTableAside = importResult
     ? formatImportResultAside(importResult)
     : orders.length
@@ -1270,6 +1332,35 @@ function CostcoPage({ googleOAuthDisabled, query }) {
     notifySuccess("SMS reminder opened.", `Message prepared for ${reminder.phone || COSTCO_RENEWAL_REMINDER_PHONE}.`);
   }
 
+  async function handleSaveCostcoAccount(nextAccount) {
+    const nextEdits = {
+      ...costcoAccountEdits,
+      [nextAccount.id]: nextAccount
+    };
+
+    setCostcoAccountEdits(nextEdits);
+    writeCostcoAccountEdits(nextEdits);
+
+    if (nextAccount.sheetName && nextAccount.sheetRowNumber) {
+      try {
+        await updateSpreadsheetSourceRow({
+          rowNumber: nextAccount.sheetRowNumber,
+          sheetName: nextAccount.sheetName,
+          source: "costco",
+          values: nextAccount.raw
+        });
+        notifySuccess("Costco account updated.", "Saved back to Google Sheets.");
+        await costcoSheetSource.refresh({ silent: false });
+      } catch (error) {
+        console.error("Failed to update Costco account sheet row", error);
+        notifyError("Saved locally, but Sheets update failed.", error.message);
+      }
+      return;
+    }
+
+    notifySuccess("Costco account updated.", "Saved as a local dashboard draft.");
+  }
+
   return (
     <>
       <TabStrip labels={costcoTabs} activeLabel={activeCostcoTab} onSelect={setActiveCostcoTab} />
@@ -1279,11 +1370,24 @@ function CostcoPage({ googleOAuthDisabled, query }) {
         <CostcoAccountsTab
           accounts={visibleCostcoAccounts}
           onSelectAccount={setSelectedCostcoAccountId}
+          onSaveAccount={handleSaveCostcoAccount}
           selectedAccount={selectedCostcoAccount}
+          sheetSource={costcoSheetSource}
         />
       ) : null}
 
-      {activeCostcoTab === "Email Orders" ? (
+      {activeCostcoTab === "Transactions" ? (
+        <SpreadsheetSourceWorkspace
+          fallbackColumns={columns.costcoTransactions}
+          fallbackRows={visibleCombinedOrders}
+          preferredSheetNames={["Transactions", "Orders"]}
+          query={query}
+          sourceId="costco"
+          title="Costco Transactions"
+        />
+      ) : null}
+
+      {activeCostcoTab === "Gmail Import" ? (
         <>
           <section className="receipt-toolbar">
             <div>
@@ -1416,7 +1520,7 @@ function CostcoRenewalsTab({ reminders, onSendReminder }) {
           {dueReminders.length ? (
             <div className="renewal-reminder-list">
               {dueReminders.map((reminder) => (
-                <div className="renewal-reminder-row" key={`${reminder.membership}-${reminder.account}`}>
+                <div className={`renewal-reminder-row status-row-${statusToneFromText(reminder.priority)}`} key={`${reminder.membership}-${reminder.account}`}>
                   <span className={`priority-dot ${reminder.priority.toLowerCase()}`} />
                   <div className="renewal-reminder-body">
                     <strong>{reminder.account}</strong>
@@ -1441,7 +1545,7 @@ function CostcoRenewalsTab({ reminders, onSendReminder }) {
           <dl className="reward-rule-list">
             <div>
               <dt>Lead Time</dt>
-              <dd>7 days</dd>
+              <dd>{COSTCO_RENEWAL_REMINDER_LEAD_DAYS} days</dd>
             </div>
             <div>
               <dt>Due Now</dt>
@@ -1455,6 +1559,10 @@ function CostcoRenewalsTab({ reminders, onSendReminder }) {
               <dt>Destination</dt>
               <dd>{COSTCO_RENEWAL_REMINDER_PHONE}</dd>
             </div>
+            <div>
+              <dt>Message Mode</dt>
+              <dd>2-week SMS queue</dd>
+            </div>
           </dl>
         </Panel>
       </section>
@@ -1466,7 +1574,13 @@ function CostcoRenewalsTab({ reminders, onSendReminder }) {
   );
 }
 
-function CostcoAccountsTab({ accounts, onSelectAccount, selectedAccount }) {
+function CostcoAccountsTab({ accounts, onSaveAccount, onSelectAccount, selectedAccount, sheetSource }) {
+  const [draftAccount, setDraftAccount] = useState(selectedAccount);
+
+  useEffect(() => {
+    setDraftAccount(selectedAccount);
+  }, [selectedAccount]);
+
   if (!selectedAccount) {
     return (
       <Panel eyebrow="Accounts" title="Costco Account Profiles">
@@ -1475,8 +1589,37 @@ function CostcoAccountsTab({ accounts, onSelectAccount, selectedAccount }) {
     );
   }
 
-  const activeAccounts = accounts.filter((account) => account.status === "Active").length;
+  const accountCounts = getCostcoAccountCounts(accounts);
   const verificationCount = accounts.filter((account) => account.needsVerification === "Yes").length;
+  const editFields = [
+    { field: "Owner Name", label: "Owner", type: "text" },
+    { field: "Membership #", label: "Membership #", type: "text" },
+    { field: "Role", label: "Role", type: "select", options: ["Primary", "Household/Add-on", "Needs Verification"] },
+    { field: "Membership Type", label: "Membership Type", type: "text" },
+    { field: "Executive?", label: "Executive", type: "select", options: ["Yes", "No", "Unknown"] },
+    { field: "Status", label: "Status", type: "select", options: ["Active", "Verify Membership", "Needs Verification", "Needs Activation/Verification", "Inactive"] },
+    { field: "Sign-In Email", label: "Sign-In Email", type: "email" },
+    { field: "Profile Email", label: "Profile Email", type: "email" },
+    { field: "Phone", label: "Phone", type: "tel" },
+    { field: "Address", label: "Address", type: "textarea" },
+    { field: "Expiration Date", label: "Expiration", type: "date" },
+    { field: "Renewal Opens", label: "Renewal Opens", type: "date" },
+    { field: "Reward Cycle Start", label: "Cycle Start", type: "date" },
+    { field: "Reward Last Updated", label: "Reward Last Updated", type: "date" },
+    { field: "Estimated 2% Reward", label: "Estimated Reward", type: "text" },
+    { field: "Spend Needed to Cap", label: "Spend Needed", type: "text" },
+    { field: "Needs Verification?", label: "Needs Verification", type: "select", options: ["No", "Yes"] },
+    { field: "Notes", label: "Notes", type: "textarea" }
+  ];
+
+  function updateDraftField(field, value) {
+    setDraftAccount((current) => buildCostcoAccountFromRaw({ ...current, raw: { ...(current?.raw || {}), [field]: value } }));
+  }
+
+  async function handleSave(event) {
+    event.preventDefault();
+    await onSaveAccount?.(draftAccount);
+  }
 
   return (
     <section className="costco-account-browser">
@@ -1486,12 +1629,17 @@ function CostcoAccountsTab({ accounts, onSelectAccount, selectedAccount }) {
             <p className="eyebrow">Profiles</p>
             <h3>{accounts.length} Accounts</h3>
           </div>
-          <span className="status-pill muted">{activeAccounts} active</span>
+          <span className="status-pill muted">
+            {accountCounts.primary} primary · {accountCounts.household} household
+          </span>
         </div>
+        <p className="account-source-note">
+          {sheetSource?.configured ? "Accounts are pulled from Google Sheets." : "Showing local fallback until COSTCO_SPREADSHEET_ID is set."}
+        </p>
         <div className="costco-account-list-scroll">
           {accounts.map((account) => (
             <button
-              className={`costco-account-row ${selectedAccount.id === account.id ? "is-selected" : ""}`}
+              className={`costco-account-row status-row-${costcoStatusTone(account)} ${selectedAccount.id === account.id ? "is-selected" : ""}`}
               key={account.id}
               onClick={() => onSelectAccount(account.id)}
               type="button"
@@ -1506,55 +1654,85 @@ function CostcoAccountsTab({ accounts, onSelectAccount, selectedAccount }) {
         </div>
       </aside>
 
-      <article className="panel costco-account-detail">
+      <form className="panel costco-account-detail" onSubmit={handleSave}>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">{selectedAccount.membershipType}</p>
-            <h3>{selectedAccount.ownerName || "Unknown owner"}</h3>
+            <p className="eyebrow">{draftAccount?.membershipType}</p>
+            <h3>{draftAccount?.ownerName || "Unknown owner"}</h3>
           </div>
           <div className="account-status-stack">
-            <span className="status-pill">{selectedAccount.status}</span>
-            {selectedAccount.needsVerification === "Yes" ? <span className="status-pill muted">Needs verification</span> : null}
+            <span className={statusPillClass(draftAccount?.status)}>{draftAccount?.status || "Unknown"}</span>
+            {draftAccount?.needsVerification === "Yes" ? <span className="status-pill status-warning">Needs verification</span> : null}
           </div>
         </div>
 
         <dl className="account-overview-list">
           <div>
             <dt>Membership #</dt>
-            <dd>{selectedAccount.membershipNumber || "Pending"}</dd>
+            <dd>{draftAccount?.membershipNumber || "Pending"}</dd>
           </div>
           <div>
             <dt>Role</dt>
-            <dd>{selectedAccount.role}</dd>
+            <dd>{draftAccount?.role}</dd>
           </div>
           <div>
             <dt>Expiration</dt>
-            <dd>{selectedAccount.expirationDate || "—"}</dd>
+            <dd>{draftAccount?.expirationDate || "—"}</dd>
           </div>
           <div>
             <dt>Estimated Reward</dt>
-            <dd>{selectedAccount.estimatedReward || "—"}</dd>
+            <dd>{draftAccount?.estimatedReward || "—"}</dd>
           </div>
         </dl>
 
-        <div className="account-detail-groups">
-          {costcoAccountDetailGroups.map((group) => (
-            <section className="account-detail-group" key={group.title}>
-              <h4>{group.title}</h4>
-              <dl>
-                {group.fields.map((field) => (
-                  <div key={field}>
-                    <dt>{field}</dt>
-                    <dd>{selectedAccount.raw[field] || "—"}</dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
+        <div className="account-edit-grid">
+          {editFields.map((item) => (
+            <label className={`travel-field ${item.type === "textarea" ? "travel-field-full" : ""}`} key={item.field}>
+              <span>{item.label}</span>
+              {item.type === "select" ? (
+                <select onChange={(event) => updateDraftField(item.field, event.target.value)} value={draftAccount?.raw?.[item.field] || ""}>
+                  <option value="">—</option>
+                  {item.options.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : item.type === "textarea" ? (
+                <textarea
+                  onChange={(event) => updateDraftField(item.field, event.target.value)}
+                  rows={3}
+                  value={draftAccount?.raw?.[item.field] || ""}
+                />
+              ) : (
+                <input
+                  onChange={(event) =>
+                    updateDraftField(
+                      item.field,
+                      item.type === "date" ? formatInputDateForDisplay(event.target.value) : event.target.value
+                    )
+                  }
+                  type={item.type}
+                  value={item.type === "date" ? formatDateForInput(draftAccount?.raw?.[item.field]) : draftAccount?.raw?.[item.field] || ""}
+                />
+              )}
+            </label>
           ))}
         </div>
 
+        <div className="travel-modal-actions">
+          <span className="account-save-note">
+            {draftAccount?.sheetName && draftAccount?.sheetRowNumber
+              ? `Saves to ${draftAccount.sheetName} row ${draftAccount.sheetRowNumber}`
+              : "Saves locally until the Costco Accounts sheet is connected"}
+          </span>
+          <button className="purchase-submit" type="submit">
+            <span>Save Account</span>
+          </button>
+        </div>
+
         {verificationCount ? <p className="account-footnote">{verificationCount} visible account records need verification.</p> : null}
-      </article>
+      </form>
     </section>
   );
 }
@@ -2242,9 +2420,16 @@ function DellPage({ query }) {
 }
 
 function CommoditiesPage({ query }) {
+  const combinedSummary = [
+    { label: "US Mint Accounts", value: String(usMintAccounts.length), detail: "Included in Commodities", tone: "green" },
+    { label: "Inventory Lots", value: String(commodities.inventory.length), detail: "Bullion and collectibles", tone: "blue" },
+    { label: "Active Mint Profiles", value: String(usMintAccounts.filter((account) => account.status === "Active").length), detail: "Ready for spreadsheet data", tone: "violet" },
+    { label: "Buyer Coverage", value: String(buyers.length), detail: "Coin and bullion outlets", tone: "amber" }
+  ];
+
   return (
     <>
-      <KpiGrid items={commodities.summary} compact />
+      <KpiGrid items={combinedSummary} compact />
       <SpreadsheetSourceWorkspace
         fallbackColumns={columns.inventory}
         fallbackRows={commodities.inventory}
@@ -2451,6 +2636,211 @@ function SettingsPage({ googleOAuthDisabled, onToggleGoogleOAuthDisabled, query 
   );
 }
 
+function buildHomeSummaryItems() {
+  const priorityAccounts = getCostcoPriorityAccounts(costcoAccounts, 2);
+  const totalRewards = costcoRewardRows.reduce((total, row) => total + (row.rewardAmount || 0), 0);
+  const spendNeeded = costcoRewardRows.reduce((total, row) => total + (row.spendNeededAmount || 0), 0);
+  const verificationCount = costcoAccounts.filter((account) => account.needsVerification === "Yes").length;
+  const combinedCommodityRecords = commodities.inventory.length + usMintAccounts.length;
+
+  return homeKpis.map((item) => {
+    if (item.label === "Total Portfolios") {
+      return { ...item, value: String(portfolioCards.length), detail: "Costco, Travel, Dell, Commodities, Ops" };
+    }
+
+    if (item.label === "Priority Renewals") {
+      return { ...item, value: String(priorityAccounts.length), detail: "Top Costco accounts needing renewal review" };
+    }
+
+    if (item.label === "Costco Rewards") {
+      return { ...item, value: formatCurrency(totalRewards), detail: "Estimated Executive rewards earned" };
+    }
+
+    if (item.label === "Spend to Cap") {
+      return { ...item, value: formatCurrency(spendNeeded), detail: "Across active Executive reward accounts" };
+    }
+
+    if (item.label === "Commodities") {
+      return { ...item, value: String(combinedCommodityRecords), detail: "US Mint accounts plus bullion inventory rows" };
+    }
+
+    if (item.label === "Open Actions") {
+      return { ...item, value: String(alerts.length + verificationCount), detail: `${verificationCount} Costco records need verification` };
+    }
+
+    return item;
+  });
+}
+
+function getCostcoPriorityAccounts(accounts, limit = 2) {
+  return sortCostcoAccounts(accounts)
+    .filter((account) => account.status === "Active" || account.needsVerification === "Yes" || /verify/i.test(account.status || ""))
+    .slice(0, limit);
+}
+
+function sortCostcoAccounts(accounts) {
+  return [...accounts].sort((left, right) => {
+    const leftPriority = costcoAccountPriority(left);
+    const rightPriority = costcoAccountPriority(right);
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+    const leftDate = parseCostcoAccountRenewalDate(left)?.getTime() || Number.MAX_SAFE_INTEGER;
+    const rightDate = parseCostcoAccountRenewalDate(right)?.getTime() || Number.MAX_SAFE_INTEGER;
+    if (leftDate !== rightDate) return leftDate - rightDate;
+
+    const leftRole = /primary/i.test(left.role || "") ? 0 : /household|add-on/i.test(left.role || "") ? 1 : 2;
+    const rightRole = /primary/i.test(right.role || "") ? 0 : /household|add-on/i.test(right.role || "") ? 1 : 2;
+    if (leftRole !== rightRole) return leftRole - rightRole;
+
+    return String(left.ownerName || "").localeCompare(String(right.ownerName || ""), undefined, { sensitivity: "base" });
+  });
+}
+
+function costcoAccountPriority(account) {
+  if (account.needsVerification === "Yes" || /verify/i.test(account.status || "")) return 0;
+
+  const renewalDate = parseCostcoAccountRenewalDate(account);
+  if (!renewalDate) return 3;
+
+  const daysUntil = daysUntilDate(renewalDate);
+  if (daysUntil < 0) return 0;
+  if (daysUntil <= COSTCO_RENEWAL_REMINDER_LEAD_DAYS) return 1;
+  if (daysUntil <= 45) return 2;
+  return 3;
+}
+
+function parseCostcoAccountRenewalDate(account) {
+  return parseTravelDate(account.renewalOpens || account.expirationDate);
+}
+
+function daysUntilDate(date) {
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  return Math.ceil((date.getTime() - todayDate.getTime()) / 86_400_000);
+}
+
+function getCostcoAccountCounts(accounts) {
+  return accounts.reduce(
+    (counts, account) => {
+      if (/primary/i.test(account.role || "")) counts.primary += 1;
+      else if (/household|add-on/i.test(account.role || "")) counts.household += 1;
+      else counts.other += 1;
+      return counts;
+    },
+    { household: 0, other: 0, primary: 0 }
+  );
+}
+
+function costcoStatusTone(account) {
+  if (account?.needsVerification === "Yes" || /verify|activation/i.test(account?.status || "")) return "warning";
+
+  const renewalDate = parseCostcoAccountRenewalDate(account || {});
+  if (renewalDate) {
+    const daysUntil = daysUntilDate(renewalDate);
+    if (daysUntil < 0) return "danger";
+    if (daysUntil <= COSTCO_RENEWAL_REMINDER_LEAD_DAYS) return "warning";
+  }
+
+  if (/active/i.test(account?.status || "")) return "success";
+  if (/inactive|past/i.test(account?.status || "")) return "danger";
+  return "neutral";
+}
+
+function statusToneFromText(value) {
+  const text = String(value || "").toLowerCase();
+  if (/past|late|fail|error|inactive|high/.test(text)) return "danger";
+  if (/verify|needs|scheduled|pending|medium|review/.test(text)) return "warning";
+  if (/active|connected|ready|tracking|mapped|clear|success|low/.test(text)) return "success";
+  if (/capped|near cap/.test(text)) return "info";
+  return "neutral";
+}
+
+function statusPillClass(value) {
+  return `status-pill status-${statusToneFromText(value)}`;
+}
+
+function readCostcoAccountEdits() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    return JSON.parse(window.localStorage.getItem(costcoAccountEditStorageKey) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeCostcoAccountEdits(edits) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(costcoAccountEditStorageKey, JSON.stringify(edits || {}));
+}
+
+function applyCostcoAccountEdits(accounts, edits) {
+  return accounts.map((account) => (edits?.[account.id] ? buildCostcoAccountFromRaw({ ...account, ...edits[account.id] }) : account));
+}
+
+function buildCostcoAccountsFromSheetSource(sourceState) {
+  const accountsSheet = sourceState.sheets?.find((sheet) => /accounts?/i.test(sheet.name));
+  if (!sourceState.configured || !accountsSheet?.rows?.length) return [];
+
+  return accountsSheet.rows.map((row, index) =>
+    buildCostcoAccountFromRaw({
+      id: row["Membership #"] || row["Sign-In Email"] || row.id || `costco-sheet-account-${index}`,
+      raw: row,
+      sheetName: accountsSheet.name,
+      sheetRowNumber: row.id
+    })
+  );
+}
+
+function buildCostcoAccountFromRaw(account) {
+  const raw = account?.raw || account || {};
+  const id = account?.id || raw["Membership #"] || raw["Sign-In Email"] || raw.id || "costco-account";
+
+  return {
+    ...account,
+    id,
+    membershipNumber: raw["Membership #"] || account?.membershipNumber || "",
+    role: raw.Role || account?.role || "",
+    linkedPrimary: raw["Linked Primary #"] || account?.linkedPrimary || "",
+    membershipType: raw["Membership Type"] || account?.membershipType || "",
+    executive: raw["Executive?"] || account?.executive || "",
+    status: raw.Status || account?.status || "",
+    ownerName: raw["Owner Name"] || account?.ownerName || "",
+    signInEmail: raw["Sign-In Email"] || account?.signInEmail || "",
+    profileEmail: raw["Profile Email"] || account?.profileEmail || "",
+    phone: raw.Phone || account?.phone || "",
+    address: raw.Address || account?.address || "",
+    memberSince: raw["Member Since"] || account?.memberSince || "",
+    expirationDate: raw["Expiration Date"] || account?.expirationDate || "",
+    renewalOpens: raw["Renewal Opens"] || account?.renewalOpens || "",
+    rewardCycleStart: raw["Reward Cycle Start"] || account?.rewardCycleStart || "",
+    estimatedReward: raw["Estimated 2% Reward"] || account?.estimatedReward || "",
+    remainingToCap: raw["Remaining to $1,250 Cap"] || account?.remainingToCap || "",
+    spendNeededToCap: raw["Spend Needed to Cap"] || account?.spendNeededToCap || "",
+    rewardLastUpdated: raw["Reward Last Updated"] || account?.rewardLastUpdated || "",
+    accountManager: raw["Account Manager / Primary Member"] || account?.accountManager || "",
+    householdMember: raw["Household Member"] || account?.householdMember || "",
+    notes: raw.Notes || account?.notes || "",
+    needsVerification: raw["Needs Verification?"] || account?.needsVerification || "",
+    raw
+  };
+}
+
+function formatDateForInput(value) {
+  const date = parseTravelDate(value);
+  if (!date) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function formatInputDateForDisplay(value) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  if (!year || !month || !day) return "";
+  return `${month}/${day}/${year}`;
+}
+
 function buildProfileSnapshot(session) {
   const name = session?.name || "Santosh Purohit";
   const role = session?.role || "Portfolio operator";
@@ -2625,7 +3015,7 @@ function buildProfileSnapshot(session) {
 
 function getProfilePortfolioValue(id, context) {
   const values = {
-    commodities: `${commodities.inventory.length} lots`,
+    commodities: `${commodities.inventory.length + usMintAccounts.length} records`,
     costco: String(context.activeCostcoAccounts.length),
     dell: `${dell.rewards.length} rewards`,
     travel: String(travelSheetNames.length),
@@ -2637,7 +3027,7 @@ function getProfilePortfolioValue(id, context) {
 
 function getProfilePortfolioDetail(id) {
   const details = {
-    commodities: "Bullion and collectible inventory readiness",
+    commodities: "US Mint collectibles, accounts, and bullion inventory",
     costco: "Memberships, renewals, rewards, and Gmail orders",
     dell: "Orders, rewards, fulfillment, and sale follow-up",
     travel: "Trips, flights, awards, and master reference data",
@@ -2898,7 +3288,7 @@ function renderCell(value, column) {
   }
 
   if (["status", "priority"].includes(column) && value) {
-    return <span className="table-pill">{value}</span>;
+    return <span className={statusPillClass(value)}>{value}</span>;
   }
   return value || "—";
 }

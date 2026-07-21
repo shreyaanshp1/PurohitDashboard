@@ -19,7 +19,7 @@ import {
 import { appendPurchase, listRecentPurchases } from "./purchaseStore.mjs";
 import { readReceiptFile, saveReceiptFile } from "./receiptFiles.mjs";
 import { loadEnvFiles } from "./serverEnv.mjs";
-import { appendSpreadsheetSourceRow, listSpreadsheetSource } from "./spreadsheetSources.mjs";
+import { appendSpreadsheetSourceRow, listSpreadsheetSource, updateSpreadsheetSourceRow } from "./spreadsheetSources.mjs";
 
 loadEnvFiles();
 
@@ -264,6 +264,17 @@ async function routeApiRequest(request, url) {
     return appendSpreadsheetSourceRow({
       sourceId: decodeURIComponent(spreadsheetAppendMatch[1]),
       sheetName: decodeURIComponent(spreadsheetAppendMatch[2]),
+      values: payload.values || payload.row || {}
+    });
+  }
+
+  const spreadsheetUpdateMatch = url.pathname.match(/^\/api\/spreadsheets\/([^/]+)\/([^/]+)\/rows\/([^/]+)$/);
+  if (spreadsheetUpdateMatch && request.method === "PATCH") {
+    const payload = await readJsonBody(request);
+    return updateSpreadsheetSourceRow({
+      sourceId: decodeURIComponent(spreadsheetUpdateMatch[1]),
+      sheetName: decodeURIComponent(spreadsheetUpdateMatch[2]),
+      rowNumber: decodeURIComponent(spreadsheetUpdateMatch[3]),
       values: payload.values || payload.row || {}
     });
   }

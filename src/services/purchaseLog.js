@@ -149,6 +149,20 @@ export async function appendSpreadsheetSourceRow({ source, sheetName, values }) 
   return postJson(`${API_ROOT}/spreadsheets/${encodeURIComponent(source)}/${encodeURIComponent(sheetName)}/rows`, { values });
 }
 
+export async function updateSpreadsheetSourceRow({ rowNumber, source, sheetName, values }) {
+  requirePurchaseBackend("Google Sheets row updates");
+  return requestJson(
+    `${API_ROOT}/spreadsheets/${encodeURIComponent(source)}/${encodeURIComponent(sheetName)}/rows/${encodeURIComponent(rowNumber)}`,
+    {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ values })
+    }
+  );
+}
+
 async function postJson(url, payload) {
   return requestJson(url, {
     method: "POST",

@@ -3,7 +3,6 @@ export const navItems = [
   { id: "profile", label: "Profile" },
   { id: "costco", label: "Costco" },
   { id: "travel", label: "Travel" },
-  { id: "usMint", label: "US Mint" },
   { id: "dell", label: "Dell" },
   { id: "commodities", label: "Commodities" },
   { id: "receipts", label: "Receipts" },
@@ -15,12 +14,12 @@ export const navItems = [
 ];
 
 export const homeKpis = [
-  { label: "Total Portfolios", value: "", detail: "Populates from Supabase", tone: "blue" },
-  { label: "Upcoming Renewals", value: "", detail: "Waiting for retailer records", tone: "amber" },
-  { label: "US Mint Releases", value: "", detail: "Waiting for release records", tone: "green" },
-  { label: "Expected Charges", value: "", detail: "Waiting for charge records", tone: "rose" },
-  { label: "Current Rewards", value: "", detail: "Waiting for reward records", tone: "violet" },
-  { label: "Open Actions", value: "", detail: "Waiting for action records", tone: "neutral" }
+  { label: "Total Portfolios", value: "", detail: "Sheets-first operating views", tone: "blue" },
+  { label: "Priority Renewals", value: "", detail: "Costco accounts needing review", tone: "amber" },
+  { label: "Costco Rewards", value: "", detail: "Executive reward balance", tone: "green" },
+  { label: "Spend to Cap", value: "", detail: "Remaining Costco card spend", tone: "rose" },
+  { label: "Commodities", value: "", detail: "US Mint + bullion combined", tone: "violet" },
+  { label: "Open Actions", value: "", detail: "Alerts and verification work", tone: "neutral" }
 ];
 
 export const portfolioCards = [
@@ -43,15 +42,6 @@ export const portfolioCards = [
     tone: "amber"
   },
   {
-    id: "usMint",
-    name: "US Mint",
-    value: "",
-    metric: "Active subscription items",
-    nextAction: "Connect Supabase records",
-    alert: "No Supabase alerts loaded",
-    tone: "green"
-  },
-  {
     id: "dell",
     name: "Dell",
     value: "",
@@ -64,10 +54,10 @@ export const portfolioCards = [
     id: "commodities",
     name: "Commodities",
     value: "",
-    metric: "Estimated inventory value",
-    nextAction: "Connect Supabase records",
-    alert: "No Supabase alerts loaded",
-    tone: "amber"
+    metric: "US Mint + bullion",
+    nextAction: "Connect commodities spreadsheet",
+    alert: "US Mint collectibles are tracked here",
+    tone: "green"
   }
 ];
 
@@ -226,6 +216,7 @@ export const COSTCO_EXECUTIVE_REWARD_RATE = 0.02;
 export const COSTCO_EXECUTIVE_REWARD_CAP = 1250;
 export const COSTCO_EXECUTIVE_SPEND_TO_CAP = COSTCO_EXECUTIVE_REWARD_CAP / COSTCO_EXECUTIVE_REWARD_RATE;
 export const COSTCO_RENEWAL_REMINDER_PHONE = "508-826-9529";
+export const COSTCO_RENEWAL_REMINDER_LEAD_DAYS = 14;
 
 const today = startOfDay(new Date());
 
@@ -305,7 +296,7 @@ export const costco = {
     { label: "Active Accounts", value: String(costcoRewardAnalytics.activeAccounts), detail: `${costcoRewardAnalytics.executiveAccounts} Executive`, tone: "blue" },
     { label: "Rewards Earned", value: formatCurrencyText(costcoRewardAnalytics.totalEstimatedReward), detail: "Estimated 2% rewards", tone: "green" },
     { label: "Renewal Alerts", value: String(costcoRenewalReminders.filter((reminder) => reminder.isVisible).length), detail: `SMS reminders to ${COSTCO_RENEWAL_REMINDER_PHONE}`, tone: "amber" },
-    { label: "Gmail Records", value: "", detail: "Waiting for Gmail import", tone: "violet" }
+    { label: "Transactions", value: "", detail: "Waiting for Google Sheets rows", tone: "violet" }
   ],
   accounts: [
     {
@@ -330,9 +321,9 @@ export const costco = {
       quantity: "",
       total: "",
       date: "",
-      status: "Waiting for Gmail import",
-      source: "Gmail order confirmation",
-      action: "Import order records"
+      status: "Waiting for Google Sheets rows",
+      source: "Google Sheets transactions",
+      action: "Connect transactions sheet"
     }
   ],
   relationships: [
@@ -354,7 +345,7 @@ export const costcoManualPulls = [];
 function buildRenewalReminder(account) {
   const renewalDate = parseUsDate(account.renewalOpens) || parseUsDate(account.expirationDate);
   const expirationDate = parseUsDate(account.expirationDate);
-  const reminderDate = renewalDate ? addDays(renewalDate, -7) : null;
+  const reminderDate = renewalDate ? addDays(renewalDate, -COSTCO_RENEWAL_REMINDER_LEAD_DAYS) : null;
   const daysUntilReminder = reminderDate ? daysBetween(today, reminderDate) : null;
   const daysUntilRenewal = renewalDate ? daysBetween(today, renewalDate) : null;
   const isPastDue = expirationDate ? daysBetween(today, expirationDate) < 0 : false;

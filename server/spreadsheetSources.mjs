@@ -1,4 +1,4 @@
-import { appendRowToSheet, getSheetValues } from "./sheetsClient.mjs";
+import { appendRowToSheet, getSheetValues, updateRowInSheet } from "./sheetsClient.mjs";
 
 const sourceConfigs = {
   alerts: {
@@ -20,7 +20,7 @@ const sourceConfigs = {
     spreadsheetIdEnv: "COMMODITIES_SPREADSHEET_ID"
   },
   costco: {
-    defaultSheetNames: ["Accounts", "Orders", "Rewards", "Renewals"],
+    defaultSheetNames: ["Accounts", "Transactions", "Orders", "Rewards", "Renewals"],
     label: "Costco",
     sheetNamesEnv: "COSTCO_SHEET_NAMES",
     spreadsheetIdEnv: "COSTCO_SPREADSHEET_ID"
@@ -102,6 +102,45 @@ export async function appendSpreadsheetSourceRow({ sourceId, sheetName, values }
 
   return {
     row: objectFromRow(headers, rowValues, currentSheet.rows.length),
+    sheetName: normalizedSheetName,
+    source: sourceId,
+    success: true
+  };
+}
+
+export async function updateSpreadsheetSourceRow({ rowNumber, sourceId, sheetName, values }) {
+  const config = sourceConfig(sourceId);
+  const spreadsheetId = configuredSpreadsheetId(config);
+  const normalizedSheetName = String(sheetName || sheetNames(config)[0] || "").trim();
+  const safeRowNumber = Number.parseInt(rowNumber, 10);
+
+  if (!spreadsheetId) {
+    throw statusError(`Set ${config.spreadsheetIdEnv} before updating ${config.label} rows.`, 503);
+  }
+
+  if (!normalizedSheetName) {
+    throw statusError("Sheet name is required.", 400);
+  }
+
+  if (!Number.isFinite(safeRowNumber) || safeRowNumber < 2) {
+    throw statusError("A valid spreadsheet row number is required.", 400);
+  }
+
+  const currentSheet = await readSheet({ sheetName: normalizedSheetName, spreadsheetId });
+  const headers = currentSheet.headers.filter(Boolean);
+  if (!headers.length) {
+    throw statusError(`${normalizedSheetName} needs a header row before rows can be updated.`, 400);
+  }
+
+  const existingRow = currentSheet.rows.find((row) => String(row.id) === String(safeRowNumber)) || {};
+  const rowValues = headers.map((header) => values?.[header] ?? existingRow[header] ?? "");
+  await updateRowInSheet({ spreadsheetId, sheetName: normalizedSheetName, rowNumber: safeRowNumber, values: rowValues });
+
+  return {
+    row: {
+      id: String(safeRowNumber),
+      ...Object.fromEntries(headers.map((header, index) => [header, rowValues[index] ?? ""]))
+    },
     sheetName: normalizedSheetName,
     source: sourceId,
     success: true
