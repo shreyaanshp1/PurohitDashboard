@@ -105,6 +105,10 @@ export async function registerUserInSupabase({ username, email = "", password, o
     return result.user || session;
   }
 
+  if (isGitHubPages()) {
+    throw new Error(signupConfigurationMessage());
+  }
+
   if (!hasSupabaseConfig()) {
     throw new Error("Supabase environment variables are not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.");
   }
@@ -139,6 +143,10 @@ export async function signUpWithSupabase({ username, email, password, name }) {
     const session = result.session;
     persistAuthSession(session);
     return session;
+  }
+
+  if (isGitHubPages()) {
+    throw new Error(signupConfigurationMessage());
   }
 
   return registerUserInSupabase({ email, username, password, name });
@@ -305,7 +313,7 @@ function parseJsonResponse(text, response) {
 function shouldUseAuthApi() {
   if (typeof window === "undefined") return false;
   if (CONFIGURED_AUTH_ENDPOINT || CONFIGURED_PURCHASE_ENDPOINT) return true;
-  return !window.location.hostname.endsWith("github.io");
+  return !isGitHubPages();
 }
 
 function shouldUseLocalAuthFallback(error, localUser) {
@@ -322,11 +330,19 @@ function isLocalBrowser() {
 }
 
 function authConfigurationMessage() {
-  if (typeof window !== "undefined" && window.location.hostname.endsWith("github.io")) {
+  if (isGitHubPages()) {
     return "Auth backend is not configured for this deployment. Set GitHub repository variables VITE_AUTH_ENDPOINT or VITE_PURCHASE_LOG_ENDPOINT to your private backend URL, then redeploy.";
   }
 
   return "Auth is not configured in this frontend. Restart npm run dev after setting local demo credentials in .env.local, or configure VITE_AUTH_ENDPOINT.";
+}
+
+function signupConfigurationMessage() {
+  return "Signup is not configured for this deployment. Deploy the Supabase auth function and rebuild GitHub Pages with VITE_AUTH_ENDPOINT.";
+}
+
+function isGitHubPages() {
+  return typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
 }
 
 function trimTrailingSlash(value) {

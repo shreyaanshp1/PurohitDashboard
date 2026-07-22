@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hashPassword, generateTwoFactorCode, signInWithSupabase, verifyTwoFactorCode } from "./auth.js";
+import { hashPassword, generateTwoFactorCode, signInWithSupabase, signUpWithSupabase, verifyTwoFactorCode } from "./auth.js";
 
 test("hashPassword returns a stable digest for the same password", () => {
   const first = hashPassword("secret-password");
@@ -87,6 +87,20 @@ test("localhost auth API failures can fall back to private demo credentials", as
   });
 });
 
+test("github pages signup explains the missing deployed auth backend", async () => {
+  await withWindow({ location: { hostname: "shreyaanshp1.github.io" } }, async () => {
+    await assert.rejects(
+      signUpWithSupabase({
+        email: "customer@example.com",
+        name: "Customer",
+        password: "customer-password",
+        username: "customer"
+      }),
+      /Signup is not configured/
+    );
+  });
+});
+
 async function withAuthEnv(updates, callback) {
   const keys = ["SUPABASE_URL", "SUPABASE_ANON_KEY", "DEMO_USERNAME", "DEMO_PASSWORD", "DEMO_NAME", "DEMO_2FA_SECRET", "DEMO_ROLE"];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
@@ -108,6 +122,21 @@ async function withAuthEnv(updates, callback) {
       } else {
         process.env[key] = value;
       }
+    }
+  }
+}
+
+async function withWindow(windowValue, callback) {
+  const previousWindow = globalThis.window;
+  globalThis.window = windowValue;
+
+  try {
+    await callback();
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      globalThis.window = previousWindow;
     }
   }
 }

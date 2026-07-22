@@ -94,7 +94,15 @@ For deployed sign-in, also set one browser-safe backend URL as a repository vari
 VITE_AUTH_ENDPOINT=https://YOUR_PRIVATE_API_HOST/api/auth
 ```
 
-If the same backend already exposes purchases at `/api/purchases`, you can set `VITE_PURCHASE_LOG_ENDPOINT` instead and the app will derive `/api/auth` from it. Do not put `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, Google service-account JSON, or demo passwords in `VITE_*` variables or GitHub Pages build variables.
+For this GitHub Pages deployment, the recommended endpoint is the Supabase auth Edge Function:
+
+```txt
+VITE_AUTH_ENDPOINT=https://YOUR_PROJECT_REF.supabase.co/functions/v1/auth
+```
+
+The Pages workflow will derive that URL automatically from `SUPABASE_PROJECT_REF` when `VITE_AUTH_ENDPOINT` is blank. Deploy the function with `.github/workflows/deploy-supabase-functions.yml`; it now deploys `auth`, `travel-sheets`, and `travel-master-data`.
+
+If the same backend already exposes purchases at `/api/purchases`, you can set `VITE_PURCHASE_LOG_ENDPOINT` instead and the app will derive `/api/auth` from it. Do not put `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, Google service-account JSON, or demo passwords in `VITE_*` variables or GitHub Pages build variables. The auth function reads the Supabase service key from its server-side environment only.
 
 ## Current Scope
 
