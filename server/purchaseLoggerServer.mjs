@@ -1,9 +1,6 @@
 import http from "node:http";
 import {
-  confirmAuthPasswordReset,
-  registerAuthUser,
-  requestAuthPasswordReset,
-  signInAuthUser
+  authenticateDashboardPassword
 } from "./authService.mjs";
 import { clearCostcoOrders, importCostcoOrders, listCostcoOrders } from "./costcoOrderImporter.mjs";
 import { exchangeGoogleOAuthCode, getGoogleAuthUrl, getGoogleOAuthStatus } from "./googleOAuthClient.mjs";
@@ -107,24 +104,25 @@ async function readRunningServiceHealth() {
 }
 
 async function routeApiRequest(request, url) {
-  if (url.pathname === "/api/auth/signin" && request.method === "POST") {
+  if (url.pathname === "/api/auth/password" && request.method === "POST") {
     const payload = await readJsonBody(request);
-    return signInAuthUser(payload);
+    return authenticateDashboardPassword(payload);
+  }
+
+  if (url.pathname === "/api/auth/signin" && request.method === "POST") {
+    throw routeDisabledError("Username login is disabled.");
   }
 
   if (url.pathname === "/api/auth/signup" && request.method === "POST") {
-    const payload = await readJsonBody(request);
-    return registerAuthUser(payload);
+    throw routeDisabledError("Signup is disabled.");
   }
 
   if (url.pathname === "/api/auth/password-reset/request" && request.method === "POST") {
-    const payload = await readJsonBody(request);
-    return requestAuthPasswordReset(payload);
+    throw routeDisabledError("Password reset is disabled.");
   }
 
   if (url.pathname === "/api/auth/password-reset/confirm" && request.method === "POST") {
-    const payload = await readJsonBody(request);
-    return confirmAuthPasswordReset(payload);
+    throw routeDisabledError("Password reset is disabled.");
   }
 
   if (url.pathname === "/api/purchases") {
@@ -289,6 +287,7 @@ async function routeApiRequest(request, url) {
 
   const knownPath = [
     "/api/purchases",
+    "/api/auth/password",
     "/api/auth/signin",
     "/api/auth/signup",
     "/api/auth/password-reset/request",
@@ -311,6 +310,12 @@ async function routeApiRequest(request, url) {
   const error = new Error(knownPath ? "Method not allowed." : "Not found.");
   error.statusCode = knownPath ? 405 : 404;
   throw error;
+}
+
+function routeDisabledError(message) {
+  const error = new Error(message);
+  error.statusCode = 410;
+  return error;
 }
 
 function isAllowedOrigin(origin) {

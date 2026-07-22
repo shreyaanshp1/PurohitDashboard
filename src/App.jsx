@@ -11,7 +11,6 @@ import {
   Gem,
   Home,
   KeyRound,
-  LogIn,
   MailCheck,
   MapPin,
   Package,
@@ -25,7 +24,6 @@ import {
   ShoppingCart,
   Trash2,
   UserRound,
-  UserPlus,
   Users,
   X
 } from "lucide-react";
@@ -83,10 +81,7 @@ import {
 import {
   clearAuthSession,
   readAuthSession,
-  requestPasswordReset,
-  resetPassword,
-  signInWithSupabase,
-  signUpWithSupabase
+  unlockDashboardWithPassword
 } from "./services/auth.js";
 
 const iconMap = {
@@ -349,148 +344,38 @@ function App() {
   );
 }
 
-const authCopy = {
-  forgot: {
-    body: "Enter your username or email and a reset link will be emailed to the account on file.",
-    eyebrow: "Account recovery",
-    title: "Reset password"
-  },
-  reset: {
-    body: "Choose a new password for this account.",
-    eyebrow: "Account recovery",
-    title: "Set new password"
-  },
-  signin: {
-    body: "Use your configured account to access the command center.",
-    eyebrow: "Secure access",
-    title: "Sign in"
-  },
-  signup: {
-    body: "Create a dashboard account with an email for password recovery.",
-    eyebrow: "New access",
-    title: "Create account"
-  }
-};
-
 function AuthPage({ onAuthenticated }) {
-  const [resetToken, setResetToken] = useState(() => readPasswordResetToken());
-  const [authMode, setAuthMode] = useState(() => (readPasswordResetToken() ? "reset" : "signin"));
+  const [isPromptOpen, setIsPromptOpen] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authError, setAuthError] = useState("");
-  const [authMessage, setAuthMessage] = useState("");
-  const [loginForm, setLoginForm] = useState({ otp: "", password: "", username: "" });
-  const [signupForm, setSignupForm] = useState({ confirmPassword: "", email: "", name: "", password: "", username: "" });
-  const [forgotForm, setForgotForm] = useState({ identifier: "" });
-  const [resetForm, setResetForm] = useState({ confirmPassword: "", password: "" });
+  const [password, setPassword] = useState("");
   const { notifyError, notifySuccess } = useToast();
-  const copy = authCopy[authMode] || authCopy.signin;
 
-  function switchAuthMode(mode) {
-    setAuthMode(mode);
+  function openPrompt() {
     setAuthError("");
-    setAuthMessage("");
+    setPassword("");
+    setIsPromptOpen(true);
   }
 
-  async function handleSignIn(event) {
+  function closePrompt() {
+    if (isAuthenticating) return;
+    setIsPromptOpen(false);
+    setAuthError("");
+    setPassword("");
+  }
+
+  async function handlePasswordUnlock(event) {
     event.preventDefault();
     setIsAuthenticating(true);
     setAuthError("");
-    setAuthMessage("");
 
     try {
-      const result = await signInWithSupabase({
-        otp: loginForm.otp,
-        password: loginForm.password,
-        username: loginForm.username
-      });
+      const result = await unlockDashboardWithPassword({ password });
       onAuthenticated(result);
-      notifySuccess(`Welcome back, ${result.name}.`);
+      notifySuccess("Dashboard unlocked.");
     } catch (error) {
       setAuthError(error.message);
-      notifyError("Sign-in failed.", error.message);
-    } finally {
-      setIsAuthenticating(false);
-    }
-  }
-
-  async function handleSignup(event) {
-    event.preventDefault();
-    setIsAuthenticating(true);
-    setAuthError("");
-    setAuthMessage("");
-
-    if (signupForm.password !== signupForm.confirmPassword) {
-      setAuthError("Passwords do not match.");
-      setIsAuthenticating(false);
-      return;
-    }
-
-    try {
-      const result = await signUpWithSupabase({
-        email: signupForm.email,
-        name: signupForm.name,
-        password: signupForm.password,
-        username: signupForm.username
-      });
-      onAuthenticated(result);
-      notifySuccess(`Account created for ${result.name}.`);
-    } catch (error) {
-      setAuthError(error.message);
-      notifyError("Sign-up failed.", error.message);
-    } finally {
-      setIsAuthenticating(false);
-    }
-  }
-
-  async function handleForgotPassword(event) {
-    event.preventDefault();
-    setIsAuthenticating(true);
-    setAuthError("");
-    setAuthMessage("");
-
-    try {
-      const result = await requestPasswordReset({
-        identifier: forgotForm.identifier,
-        resetUrlBase: passwordResetBaseUrl()
-      });
-      setAuthMessage(
-        result.maskedEmail
-          ? `Reset link sent to ${result.maskedEmail}.`
-          : "If that account exists, a reset link has been sent."
-      );
-      notifySuccess("Password reset email sent.");
-    } catch (error) {
-      setAuthError(error.message);
-      notifyError("Reset email failed.", error.message);
-    } finally {
-      setIsAuthenticating(false);
-    }
-  }
-
-  async function handleResetPassword(event) {
-    event.preventDefault();
-    setIsAuthenticating(true);
-    setAuthError("");
-    setAuthMessage("");
-
-    if (resetForm.password !== resetForm.confirmPassword) {
-      setAuthError("Passwords do not match.");
-      setIsAuthenticating(false);
-      return;
-    }
-
-    try {
-      await resetPassword({ password: resetForm.password, token: resetToken });
-      clearPasswordResetTokenFromUrl();
-      setResetToken("");
-      setResetForm({ confirmPassword: "", password: "" });
-      setLoginForm((current) => ({ ...current, password: "" }));
-      setAuthMode("signin");
-      setAuthMessage("Password updated. Sign in with your new password.");
-      notifySuccess("Password updated.");
-    } catch (error) {
-      setAuthError(error.message);
-      notifyError("Password reset failed.", error.message);
+      notifyError("Unlock failed.", error.message);
     } finally {
       setIsAuthenticating(false);
     }
@@ -498,138 +383,51 @@ function AuthPage({ onAuthenticated }) {
 
   return (
     <div className="auth-page">
-      <section className="auth-card">
+      <section className="auth-card password-gate-card">
         <div className="auth-card__header">
-          <p className="eyebrow">{copy.eyebrow}</p>
-          <h2>{copy.title}</h2>
-          <p>{copy.body}</p>
+          <p className="eyebrow">Admin access</p>
+          <h2>Dashboard locked</h2>
+          <p>Use the dashboard password to open the admin workspace.</p>
         </div>
+      </section>
 
-        {authMode !== "reset" ? (
-          <div className="auth-switcher" aria-label="Authentication mode">
-            <button className={authMode === "signin" ? "is-active" : ""} onClick={() => switchAuthMode("signin")} type="button">
-              <LogIn size={16} />
-              <span>Sign in</span>
-            </button>
-            <button className={authMode === "signup" ? "is-active" : ""} onClick={() => switchAuthMode("signup")} type="button">
-              <UserPlus size={16} />
-              <span>Sign up</span>
-            </button>
-          </div>
-        ) : null}
+      <button className="password-gate-button" onClick={openPrompt} type="button">
+        <KeyRound size={18} />
+        <span>Enter</span>
+      </button>
 
-        {authMode === "signin" ? (
-          <form className="auth-form" onSubmit={handleSignIn}>
-            <label className="auth-field">
-              <span>Username or email</span>
-              <input onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username or email" type="text" value={loginForm.username} />
-            </label>
-
-            <label className="auth-field">
-              <span>Password</span>
-              <input onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" type="password" value={loginForm.password} />
-            </label>
-
-            <label className="auth-field">
-              <span>2FA code</span>
-              <input onChange={(event) => setLoginForm((current) => ({ ...current, otp: event.target.value }))} placeholder="123456" type="text" value={loginForm.otp} />
-            </label>
-
-            <div className="auth-inline-actions">
-              <button className="text-action" onClick={() => switchAuthMode("forgot")} type="button">
-                <KeyRound size={15} />
-                <span>Forgot password?</span>
+      {isPromptOpen ? (
+        <div className="password-gate-modal" role="presentation">
+          <button className="logger-modal__backdrop" aria-label="Close password prompt" onClick={closePrompt} type="button" />
+          <form aria-modal="true" className="password-gate-panel" onSubmit={handlePasswordUnlock} role="dialog">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Admin password</p>
+                <h3>Enter dashboard</h3>
+              </div>
+              <button className="icon-button" onClick={closePrompt} type="button" aria-label="Close password prompt">
+                <X size={18} />
               </button>
             </div>
-
-            <AuthStatus error={authError} message={authMessage} />
-
-            <button className="purchase-submit auth-submit" disabled={isAuthenticating} type="submit">
-              <LogIn size={16} />
-              <span>{isAuthenticating ? "Signing in..." : "Log in"}</span>
-            </button>
-          </form>
-        ) : null}
-
-        {authMode === "signup" ? (
-          <form className="auth-form" onSubmit={handleSignup}>
-            <label className="auth-field">
-              <span>Name</span>
-              <input onChange={(event) => setSignupForm((current) => ({ ...current, name: event.target.value }))} placeholder="Name" type="text" value={signupForm.name} />
-            </label>
-
-            <label className="auth-field">
-              <span>Email</span>
-              <input onChange={(event) => setSignupForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email" type="email" value={signupForm.email} />
-            </label>
-
-            <label className="auth-field">
-              <span>Username</span>
-              <input onChange={(event) => setSignupForm((current) => ({ ...current, username: event.target.value }))} placeholder="Username" type="text" value={signupForm.username} />
-            </label>
-
             <label className="auth-field">
               <span>Password</span>
-              <input onChange={(event) => setSignupForm((current) => ({ ...current, password: event.target.value }))} placeholder="At least 8 characters" type="password" value={signupForm.password} />
+              <input
+                autoComplete="current-password"
+                autoFocus
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Dashboard password"
+                type="password"
+                value={password}
+              />
             </label>
-
-            <label className="auth-field">
-              <span>Confirm password</span>
-              <input onChange={(event) => setSignupForm((current) => ({ ...current, confirmPassword: event.target.value }))} placeholder="Confirm password" type="password" value={signupForm.confirmPassword} />
-            </label>
-
-            <AuthStatus error={authError} message={authMessage} />
-
-            <button className="purchase-submit auth-submit" disabled={isAuthenticating} type="submit">
-              <UserPlus size={16} />
-              <span>{isAuthenticating ? "Creating..." : "Create account"}</span>
-            </button>
-          </form>
-        ) : null}
-
-        {authMode === "forgot" ? (
-          <form className="auth-form" onSubmit={handleForgotPassword}>
-            <label className="auth-field">
-              <span>Username or email</span>
-              <input onChange={(event) => setForgotForm({ identifier: event.target.value })} placeholder="Username or email" type="text" value={forgotForm.identifier} />
-            </label>
-
-            <AuthStatus error={authError} message={authMessage} />
-
-            <button className="purchase-submit auth-submit" disabled={isAuthenticating} type="submit">
+            <AuthStatus error={authError} />
+            <button className="purchase-submit auth-submit" disabled={isAuthenticating || !password} type="submit">
               <KeyRound size={16} />
-              <span>{isAuthenticating ? "Sending..." : "Send reset link"}</span>
-            </button>
-
-            <button className="secondary-action auth-submit" onClick={() => switchAuthMode("signin")} type="button">
-              Back to sign in
+              <span>{isAuthenticating ? "Checking..." : "Unlock dashboard"}</span>
             </button>
           </form>
-        ) : null}
-
-        {authMode === "reset" ? (
-          <form className="auth-form" onSubmit={handleResetPassword}>
-            <label className="auth-field">
-              <span>New password</span>
-              <input onChange={(event) => setResetForm((current) => ({ ...current, password: event.target.value }))} placeholder="At least 8 characters" type="password" value={resetForm.password} />
-            </label>
-
-            <label className="auth-field">
-              <span>Confirm password</span>
-              <input onChange={(event) => setResetForm((current) => ({ ...current, confirmPassword: event.target.value }))} placeholder="Confirm password" type="password" value={resetForm.confirmPassword} />
-            </label>
-
-            <AuthStatus error={authError} message={authMessage} />
-
-            <button className="purchase-submit auth-submit" disabled={isAuthenticating || !resetToken} type="submit">
-              <KeyRound size={16} />
-              <span>{isAuthenticating ? "Updating..." : "Update password"}</span>
-            </button>
-          </form>
-        ) : null}
-
-        <p className="auth-hint">Credentials are managed by the private auth API and Supabase user table.</p>
-      </section>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -638,27 +436,6 @@ function AuthStatus({ error, message }) {
   if (error) return <p className="auth-error">{error}</p>;
   if (message) return <p className="auth-message">{message}</p>;
   return null;
-}
-
-function readPasswordResetToken() {
-  if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("resetToken") || "";
-}
-
-function passwordResetBaseUrl() {
-  if (typeof window === "undefined") return "";
-
-  const url = new URL(window.location.href);
-  url.searchParams.delete("resetToken");
-  return url.href;
-}
-
-function clearPasswordResetTokenFromUrl() {
-  if (typeof window === "undefined") return;
-
-  const url = new URL(window.location.href);
-  url.searchParams.delete("resetToken");
-  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function readGoogleOAuthDisabledPreference() {

@@ -15,19 +15,20 @@ Then open the local Vite URL printed in the terminal.
 
 `npm run dev` starts the private purchase API and the Vite app together. Purchase and receipt data is persisted through Supabase, not browser `localStorage`.
 
-## Sign-In Credentials
+## Dashboard Password
 
-The previous built-in demo fallback has been removed. For real access control, use Supabase-backed users. For private local testing only, create `.env.local` and set:
+The username/password and sign-up screens are disabled. The dashboard unlocks with one server-side admin password.
+
+For private local testing, create `.env.local` and set:
 
 ```sh
-VITE_DEMO_USERNAME=your-private-username
-VITE_DEMO_PASSWORD=your-long-private-password
-VITE_DEMO_NAME=Local Admin
+ADMIN_DASHBOARD_PASSWORD=your-long-private-password
+ADMIN_DASHBOARD_NAME=Dashboard Admin
 ```
 
 Restart `npm run dev` after changing `.env.local`.
 
-Security note: Vite exposes `VITE_*` values to browser code. The Vite config only injects these demo credentials while running the local dev server; production builds blank them out. Do not rely on local demo credentials to protect a public deployment. Public deployments should use the private auth API and Supabase auth records.
+Security note: Vite exposes `VITE_*` values to browser code. Keep the dashboard password in non-`VITE` backend variables only. For GitHub Pages, store the same value as a Supabase Function secret named `ADMIN_DASHBOARD_PASSWORD`; do not add it as a GitHub Pages build variable.
 
 ## Useful Scripts
 
@@ -88,7 +89,7 @@ Then add this GitHub repository variable under `Settings > Secrets and variables
 VITE_TRAVEL_MASTER_DATA_ENDPOINT=https://YOUR_PROJECT_REF.supabase.co/functions/v1/travel-master-data
 ```
 
-For deployed sign-in, also set one browser-safe backend URL as a repository variable:
+For deployed dashboard unlock, also set one browser-safe backend URL as a repository variable:
 
 ```txt
 VITE_AUTH_ENDPOINT=https://YOUR_PRIVATE_API_HOST/api/auth
@@ -102,7 +103,7 @@ VITE_AUTH_ENDPOINT=https://YOUR_PROJECT_REF.supabase.co/functions/v1/auth
 
 The Pages workflow will derive that URL automatically from `SUPABASE_PROJECT_REF` when `VITE_AUTH_ENDPOINT` is blank. Deploy the function with `.github/workflows/deploy-supabase-functions.yml`; it now deploys `auth`, `travel-sheets`, and `travel-master-data`.
 
-If the same backend already exposes purchases at `/api/purchases`, you can set `VITE_PURCHASE_LOG_ENDPOINT` instead and the app will derive `/api/auth` from it. Do not put `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, Google service-account JSON, or demo passwords in `VITE_*` variables or GitHub Pages build variables. The auth function reads the Supabase service key from its server-side environment only.
+If the same backend already exposes purchases at `/api/purchases`, you can set `VITE_PURCHASE_LOG_ENDPOINT` instead and the app will derive `/api/auth` from it. Do not put `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, Google service-account JSON, dashboard passwords, or demo passwords in `VITE_*` variables or GitHub Pages build variables. The auth function reads its private password from the Supabase Function environment only.
 
 ## Current Scope
 
