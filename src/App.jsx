@@ -11,7 +11,6 @@ import {
   Gem,
   Home,
   KeyRound,
-  MailCheck,
   MapPin,
   Package,
   Plane,
@@ -22,7 +21,6 @@ import {
   Send,
   Settings,
   ShoppingCart,
-  Trash2,
   UserRound,
   Users,
   X
@@ -30,8 +28,6 @@ import {
 import PurchaseLogger from "./components/PurchaseLogger.jsx";
 import ReceiptLogger from "./components/ReceiptLogger.jsx";
 import { useToast } from "./components/ToastProvider.jsx";
-import { COSTCO_ORDER_GMAIL_QUERY } from "./services/costcoGmailQuery.js";
-import { US_MINT_CONFIRMED_ORDER_GMAIL_QUERY } from "./services/usMintGmailQuery.js";
 import {
   alertRules,
   alerts,
@@ -43,7 +39,6 @@ import {
   commodities,
   costco,
   costcoAccounts,
-  costcoManualPulls,
   costcoRenewalReminders,
   costcoRewardKpis,
   costcoRewardRows,
@@ -60,20 +55,9 @@ import {
   usMintAccounts
 } from "./data.js";
 import {
-  clearCostcoOrders,
-  clearUsMintOrders,
   appendSpreadsheetSourceRow,
-  appendTravelSheetRow,
   createReceiptFolder,
-  getGoogleOAuthStatus,
-  getGoogleOAuthUrl,
-  importCostcoOrders,
-  importUsMintOrders,
-  listCostcoOrders,
   listSpreadsheetSource,
-  listTravelMasterData,
-  listTravelSheets,
-  listUsMintOrders,
   listReceiptFolders,
   listReceipts,
   updateSpreadsheetSourceRow
@@ -102,11 +86,9 @@ const iconMap = {
 
 const columns = {
   costcoOrders: ["status", "order", "membership", "item", "itemNumber", "quantity", "subtotal", "tax", "total", "date", "action"],
-  costcoCombinedOrders: ["source", "status", "order", "membership", "item", "itemNumber", "quantity", "subtotal", "tax", "total", "date", "action"],
   costcoRewards: ["account", "membership", "reward", "remaining", "spendNeeded", "cycleStart", "cycleEnd", "updated", "status"],
   costcoRenewals: ["status", "account", "membership", "role", "renewalDate", "reminderDate", "expirationDate", "daysUntil", "priority", "action"],
   costcoTransactions: ["date", "account", "membership", "item", "quantity", "subtotal", "tax", "total", "status", "action"],
-  usMintOrders: ["status", "order", "item", "unitType", "quantity", "subtotal", "total", "date", "action"],
   releases: ["release", "date", "accounts", "quantity", "charge", "buyer", "action"],
   subscriptions: ["account", "items", "card", "address", "status"],
   dellOrders: ["account", "order", "item", "rewards", "status", "buyer", "profit"],
@@ -117,155 +99,22 @@ const columns = {
   settings: ["source", "query", "status", "cadence"]
 };
 
-const costcoTabs = ["Accounts", "Transactions", "Rewards Planner", "Renewals", "Google Sheets", "Gmail Import"];
-const costcoSortableOrderColumns = ["status", "item", "date"];
+const costcoTabs = ["Accounts", "Transactions", "Rewards Planner", "Renewals"];
 const travelSheetNames = ["Trips", "Flights", "Certificates_Awards"];
-const travelMasterDataSheetNames = [
-  "Travelers",
-  "Hotel_Properties",
-  "Hotel_Brands",
-  "Airports",
-  "National_Park_States",
-  "Cities",
-  "Currencies",
-  "Airlines",
-  "Credit_Cards",
-  "National Parks",
-  "Traveler_Loyalty_Accounts",
-  "States_Provinces",
-  "Rental_Car_Companies",
-  "Expense_Categories",
-  "Hotel_Chains",
-  "Loyalty_Programs",
-  "Place_Types",
-  "Countries"
-];
-const travelMasterDataTab = "Master Data";
-const travelTabs = ["Dashboard", ...travelSheetNames, travelMasterDataTab];
+const travelTabs = ["Dashboard", ...travelSheetNames];
 const fallbackTravelSheets = travelSheetNames.map((name) => ({
   name,
   headers: getDefaultTravelHeaders(name),
   rows: [],
   rowCount: 0
 }));
-const usMintTabs = ["Accounts", "Email Orders", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales", "Google Sheets"];
-const googleOAuthMessageType = "google-oauth-complete";
-const googleOAuthPopupFeatures = "popup=yes,width=520,height=720,left=160,top=80";
-const googleOAuthWaitMs = 120000;
-const googleOAuthDisabledStorageKey = "portfolio-google-oauth-disabled";
+const usMintTabs = ["Accounts", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales"];
 const costcoAccountEditStorageKey = "portfolio-costco-account-edits";
-
-async function connectGoogleOAuth({ googleOAuthDisabled = false, notifyError, notifySuccess, setGoogleStatus }) {
-  if (googleOAuthDisabled) {
-    const status = { authenticated: false, configured: false, disabled: true };
-    setGoogleStatus?.(status);
-    notifyError("Google OAuth is disabled.", "Turn it back on in Settings before connecting Gmail.");
-    return status;
-  }
-
-  let oauthWindow = null;
-
-  try {
-    oauthWindow = openGoogleOAuthWindow();
-    const result = await getGoogleOAuthUrl({ returnUrl: window.location.href });
-
-    if (!result.authUrl) {
-      throw new Error("Google OAuth URL was not returned.");
-    }
-
-    if (!oauthWindow || oauthWindow.closed) {
-      window.location.assign(result.authUrl);
-      return null;
-    }
-
-    oauthWindow.location.href = result.authUrl;
-    notifySuccess("Google OAuth opened.");
-
-    const completion = await waitForGoogleOAuthCompletion(oauthWindow);
-    const latestStatus = await getGoogleOAuthStatus();
-    setGoogleStatus(latestStatus);
-
-    if (latestStatus.authenticated) {
-      notifySuccess("Gmail connected.");
-      return latestStatus;
-    }
-
-    notifyError(
-      "Google OAuth was not completed.",
-      completion?.error || "Close any stale Google OAuth tabs and try again."
-    );
-    return latestStatus;
-  } catch (error) {
-    if (oauthWindow && !oauthWindow.closed) {
-      oauthWindow.close();
-    }
-
-    console.error("Failed to open Google OAuth", error);
-    notifyError("Could not open Google OAuth.", error.message);
-    return null;
-  }
-}
-
-function openGoogleOAuthWindow() {
-  const popup = window.open("", "google-oauth", googleOAuthPopupFeatures);
-
-  if (!popup) {
-    return null;
-  }
-
-  try {
-    popup.document.title = "Connecting Gmail";
-    popup.document.body.innerHTML = `
-      <main style="font-family: system-ui, sans-serif; padding: 24px;">
-        <h1 style="font-size: 20px; margin: 0 0 8px;">Connecting Gmail</h1>
-        <p style="color: #475569; line-height: 1.5; margin: 0;">Waiting for Google OAuth...</p>
-      </main>
-    `;
-    popup.focus();
-  } catch {
-    // The popup is navigated immediately after the OAuth URL returns.
-  }
-
-  return popup;
-}
-
-function waitForGoogleOAuthCompletion(oauthWindow) {
-  return new Promise((resolve) => {
-    let isSettled = false;
-
-    const finish = (result) => {
-      if (isSettled) return;
-      isSettled = true;
-      window.removeEventListener("message", handleMessage);
-      window.clearInterval(pollId);
-      window.clearTimeout(timeoutId);
-      resolve(result);
-    };
-
-    const handleMessage = (event) => {
-      if (event.data?.type !== googleOAuthMessageType) return;
-      finish(event.data);
-    };
-
-    const pollId = window.setInterval(() => {
-      if (oauthWindow.closed) {
-        finish({ error: "The Google OAuth tab closed before Gmail connected.", success: false });
-      }
-    }, 600);
-
-    const timeoutId = window.setTimeout(() => {
-      finish({ error: "Timed out waiting for Google OAuth to finish.", success: false });
-    }, googleOAuthWaitMs);
-
-    window.addEventListener("message", handleMessage);
-  });
-}
 
 function App() {
   const [activePage, setActivePage] = useState("home");
   const [query, setQuery] = useState("");
   const [session, setSession] = useState(readAuthSession());
-  const [googleOAuthDisabled, setGoogleOAuthDisabled] = useState(readGoogleOAuthDisabledPreference());
 
   const pageTitle = navItems.find((item) => item.id === activePage)?.label || "Home";
 
@@ -279,12 +128,6 @@ function App() {
   function handleLogout() {
     clearAuthSession();
     setSession(null);
-  }
-
-  function setGoogleOAuthDisabledPreference(disabled) {
-    const nextValue = Boolean(disabled);
-    setGoogleOAuthDisabled(nextValue);
-    writeGoogleOAuthDisabledPreference(nextValue);
   }
 
   if (!session) {
@@ -333,8 +176,6 @@ function App() {
         <Header title={pageTitle} activePage={activePage} query={query} setQuery={setQuery} />
         <Page
           activePage={activePage}
-          googleOAuthDisabled={googleOAuthDisabled}
-          onToggleGoogleOAuthDisabled={setGoogleOAuthDisabledPreference}
           query={query}
           session={session}
           setActivePage={setActivePage}
@@ -438,16 +279,6 @@ function AuthStatus({ error, message }) {
   return null;
 }
 
-function readGoogleOAuthDisabledPreference() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(googleOAuthDisabledStorageKey) === "true";
-}
-
-function writeGoogleOAuthDisabledPreference(disabled) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(googleOAuthDisabledStorageKey, disabled ? "true" : "false");
-}
-
 function Header({ title, activePage, query, setQuery }) {
   return (
     <section className="page-header">
@@ -470,12 +301,12 @@ function Header({ title, activePage, query, setQuery }) {
   );
 }
 
-function Page({ activePage, googleOAuthDisabled, onToggleGoogleOAuthDisabled, setActivePage, query, session }) {
+function Page({ activePage, setActivePage, query, session }) {
   if (activePage === "home") return <HomePage setActivePage={setActivePage} query={query} />;
   if (activePage === "profile") return <ProfilePage query={query} session={session} setActivePage={setActivePage} />;
-  if (activePage === "costco") return <CostcoPage googleOAuthDisabled={googleOAuthDisabled} query={query} />;
+  if (activePage === "costco") return <CostcoPage query={query} />;
   if (activePage === "travel") return <TravelPage query={query} />;
-  if (activePage === "usMint") return <UsMintPage googleOAuthDisabled={googleOAuthDisabled} query={query} />;
+  if (activePage === "usMint") return <UsMintPage query={query} />;
   if (activePage === "dell") return <DellPage query={query} />;
   if (activePage === "commodities") return <CommoditiesPage query={query} />;
   if (activePage === "receipts") return <ReceiptsPage query={query} />;
@@ -483,13 +314,7 @@ function Page({ activePage, googleOAuthDisabled, onToggleGoogleOAuthDisabled, se
   if (activePage === "rewards") return <RewardsPage query={query} />;
   if (activePage === "alerts") return <AlertsPage query={query} />;
   if (activePage === "reports") return <ReportsPage query={query} />;
-  return (
-    <SettingsPage
-      googleOAuthDisabled={googleOAuthDisabled}
-      onToggleGoogleOAuthDisabled={onToggleGoogleOAuthDisabled}
-      query={query}
-    />
-  );
+  return <SettingsPage query={query} />;
 }
 
 function HomePage({ setActivePage, query }) {
@@ -840,24 +665,40 @@ function SpreadsheetLogModal({ onClose, onSaved, sheet, sourceId, sourceLabel })
         </div>
 
         <div className="travel-form-grid">
-          {headers.map((header) => (
-            <label className={`travel-field ${isLongTravelField(header) ? "travel-field-full" : ""}`} key={header}>
-              <span>{header}</span>
-              {isLongTravelField(header) ? (
-                <textarea
-                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
-                  rows={3}
-                  value={values[header] || ""}
-                />
-              ) : (
-                <input
-                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
-                  type={getTravelInputType(header)}
-                  value={values[header] || ""}
-                />
-              )}
-            </label>
-          ))}
+          {headers.map((header) => {
+            const categoricalOptions = getCategoricalFieldOptions(header, sheet);
+
+            return (
+              <label className={`travel-field ${isLongTravelField(header) ? "travel-field-full" : ""}`} key={header}>
+                <span>{header}</span>
+                {categoricalOptions.length ? (
+                  <select
+                    onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
+                    value={values[header] || ""}
+                  >
+                    <option value="">—</option>
+                    {categoricalOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                ) : isLongTravelField(header) ? (
+                  <textarea
+                    onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
+                    rows={3}
+                    value={values[header] || ""}
+                  />
+                ) : (
+                  <input
+                    onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
+                    type={getTravelInputType(header)}
+                    value={values[header] || ""}
+                  />
+                )}
+              </label>
+            );
+          })}
         </div>
 
         <div className="travel-modal-actions">
@@ -940,66 +781,17 @@ function PurchaseLoggerModal({ onClose }) {
   );
 }
 
-function CostcoPage({ googleOAuthDisabled, query }) {
-  const [orders, setOrders] = useState([]);
+function CostcoPage({ query }) {
   const [activeCostcoTab, setActiveCostcoTab] = useState("Accounts");
   const [selectedCostcoAccountId, setSelectedCostcoAccountId] = useState(costcoAccounts[0]?.id || "");
   const [costcoAccountEdits, setCostcoAccountEdits] = useState(readCostcoAccountEdits);
-  const [googleStatus, setGoogleStatus] = useState({ authenticated: false, configured: false });
-  const [importResult, setImportResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isClearing, setIsClearing] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isImportingHistory, setIsImportingHistory] = useState(false);
   const { notifyError, notifySuccess } = useToast();
   const costcoSheetSource = useSpreadsheetSource("costco");
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    async function loadCostcoData() {
-      setIsLoading(true);
-
-      const [statusResult, ordersResult] = await Promise.allSettled([
-        googleOAuthDisabled ? Promise.resolve({ authenticated: false, configured: false, disabled: true }) : getGoogleOAuthStatus(),
-        listCostcoOrders({ limit: 1000 })
-      ]);
-
-      if (!isCurrent) return;
-
-      if (statusResult.status === "fulfilled") {
-        setGoogleStatus(statusResult.value);
-      } else {
-        console.error("Failed to load Google OAuth status", statusResult.reason);
-        notifyError("Could not load Google OAuth status.", statusResult.reason.message);
-      }
-
-      if (ordersResult.status === "fulfilled") {
-        setOrders(ordersResult.value.orders || []);
-      } else {
-        console.error("Failed to load Costco data", ordersResult.reason);
-        notifyError("Could not load Costco order rows.", ordersResult.reason.message);
-      }
-
-      setIsLoading(false);
-    }
-
-    loadCostcoData();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [googleOAuthDisabled, notifyError]);
-
-  const visibleOrders = filterRows(orders, query);
-  const visibleManualPulls = filterRows(costcoManualPulls, query);
-  const visibleCombinedOrders = filterRows(
-    [
-      ...orders.map((order) => ({ ...order, source: "Gmail" })),
-      ...costcoManualPulls.map((order) => ({ ...order, source: order.source || "Manual Pull" }))
-    ],
-    query
+  const costcoTransactionSheet = useMemo(
+    () => costcoSheetSource.sheets?.find((sheet) => /transactions/i.test(sheet.name)),
+    [costcoSheetSource.sheets]
   );
+  const transactionCount = costcoTransactionSheet?.rowCount || costcoTransactionSheet?.rows?.length || 0;
   const sheetCostcoAccounts = useMemo(() => buildCostcoAccountsFromSheetSource(costcoSheetSource), [costcoSheetSource.sheets]);
   const sourceCostcoAccounts = sheetCostcoAccounts.length ? sheetCostcoAccounts : costcoAccounts;
   const editableCostcoAccounts = useMemo(
@@ -1007,103 +799,49 @@ function CostcoPage({ googleOAuthDisabled, query }) {
     [costcoAccountEdits, sourceCostcoAccounts]
   );
   const visibleCostcoAccounts = useMemo(() => filterRows(editableCostcoAccounts, query), [editableCostcoAccounts, query]);
-  const visibleRenewalReminders = useMemo(() => filterRows(costcoRenewalReminders, query), [query]);
+  const liveCostcoRewardRows = useMemo(() => buildCostcoRewardRows(editableCostcoAccounts), [editableCostcoAccounts]);
+  const liveCostcoRewardKpis = useMemo(
+    () => buildCostcoRewardKpis(editableCostcoAccounts, liveCostcoRewardRows),
+    [editableCostcoAccounts, liveCostcoRewardRows]
+  );
+  const liveRenewalReminders = useMemo(() => buildCostcoRenewalReminders(editableCostcoAccounts), [editableCostcoAccounts]);
+  const visibleRenewalReminders = useMemo(() => filterRows(liveRenewalReminders, query), [liveRenewalReminders, query]);
   const costcoSummaryItems = useMemo(
     () =>
       costco.summary.map((item) =>
         item.label === "Transactions"
           ? {
               ...item,
-              value: String(orders.length),
-              detail: orders.length ? "Imported transaction rows" : "Waiting for Google Sheets rows"
+              value: String(transactionCount),
+              detail: transactionCount ? "Rows from Costco sheet" : "Waiting for Costco sheet rows"
+            }
+          : item.label === "Active Accounts"
+          ? {
+              ...item,
+              value: String(editableCostcoAccounts.filter((account) => account.status === "Active").length),
+              detail: `${editableCostcoAccounts.filter((account) => account.executive === "Yes").length} Executive`
+            }
+          : item.label === "Rewards Earned"
+          ? {
+              ...item,
+              value: formatCurrency(liveCostcoRewardRows.reduce((total, row) => total + (row.rewardAmount || 0), 0)),
+              detail: "Estimated 2% rewards"
+            }
+          : item.label === "Renewal Alerts"
+          ? {
+              ...item,
+              value: String(liveRenewalReminders.filter((reminder) => reminder.isVisible).length),
+              detail: `SMS reminders to ${COSTCO_RENEWAL_REMINDER_PHONE}`
             }
           : item
       ),
-    [orders.length]
+    [editableCostcoAccounts, liveCostcoRewardRows, liveRenewalReminders, transactionCount]
   );
   const selectedCostcoAccount =
     visibleCostcoAccounts.find((account) => account.id === selectedCostcoAccountId) ||
     visibleCostcoAccounts[0] ||
     editableCostcoAccounts.find((account) => account.id === selectedCostcoAccountId) ||
     editableCostcoAccounts[0];
-  const orderTableAside = importResult
-    ? formatImportResultAside(importResult)
-    : orders.length
-      ? `${orders.length} imported`
-      : "Raw email bodies excluded";
-  const isCostcoBusy = isClearing || isImporting || isImportingHistory;
-  const gmailStatus = isLoading
-    ? "Loading"
-    : googleOAuthDisabled || googleStatus.disabled
-      ? "OAuth disabled"
-      : googleStatus.authenticated
-      ? "Gmail connected"
-      : googleStatus.configured
-        ? "Gmail ready"
-        : "OAuth missing";
-
-  async function handleConnectGmail() {
-    return connectGoogleOAuth({ googleOAuthDisabled, notifyError, notifySuccess, setGoogleStatus });
-  }
-
-  async function handleImportOrders({ allHistory = false } = {}) {
-    if (googleOAuthDisabled) {
-      notifyError("Google OAuth is disabled.", "Turn it back on in Settings before importing Gmail.");
-      return;
-    }
-
-    let latestStatus = await getGoogleOAuthStatus();
-    setGoogleStatus(latestStatus);
-
-    if (!latestStatus.authenticated) {
-      latestStatus = await handleConnectGmail();
-      if (!latestStatus?.authenticated) return;
-    }
-
-    const setWorking = allHistory ? setIsImportingHistory : setIsImporting;
-    setWorking(true);
-
-    try {
-      const result = await importCostcoOrders({
-        limit: allHistory ? 10000 : 5000,
-        limitPerBatch: allHistory ? 1000 : "",
-        historyStartYear: allHistory ? 2010 : "",
-        query: COSTCO_ORDER_GMAIL_QUERY
-      });
-      const ordersResult = await listCostcoOrders({ limit: 1000 });
-      setOrders(ordersResult.orders || result.orders || []);
-      setImportResult(result);
-      notifySuccess(`Scanned ${result.scanned} Costco emails; imported ${result.imported}.`);
-    } catch (error) {
-      console.error("Failed to import Costco orders", error);
-      notifyError("Costco import failed.", error.message);
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function handleClearOrders() {
-    const shouldClear = window.confirm(
-      "Clear imported Costco order rows from this dashboard? Gmail emails will not be deleted."
-    );
-
-    if (!shouldClear) return;
-
-    setIsClearing(true);
-
-    try {
-      const result = await clearCostcoOrders();
-      setOrders([]);
-      setImportResult(null);
-      notifySuccess(`Cleared ${result.deleted || 0} imported Costco order rows.`);
-    } catch (error) {
-      console.error("Failed to clear Costco orders", error);
-      notifyError("Could not clear Costco order rows.", error.message);
-    } finally {
-      setIsClearing(false);
-    }
-  }
-
   function handleSendRenewalReminder(reminder) {
     window.location.href = buildSmsHref(reminder.phone || COSTCO_RENEWAL_REMINDER_PHONE, reminder.message);
     notifySuccess("SMS reminder opened.", `Message prepared for ${reminder.phone || COSTCO_RENEWAL_REMINDER_PHONE}.`);
@@ -1156,88 +894,29 @@ function CostcoPage({ googleOAuthDisabled, query }) {
       {activeCostcoTab === "Transactions" ? (
         <SpreadsheetSourceWorkspace
           fallbackColumns={columns.costcoTransactions}
-          fallbackRows={visibleCombinedOrders}
-          preferredSheetNames={["Transactions", "Orders"]}
+          fallbackRows={costco.orders}
+          preferredSheetNames={["Transactions"]}
           query={query}
           sourceId="costco"
           title="Costco Transactions"
         />
       ) : null}
 
-      {activeCostcoTab === "Gmail Import" ? (
-        <>
-          <section className="receipt-toolbar">
-            <div>
-              <p className="eyebrow">Gmail OAuth</p>
-              <h3>Costco Email Orders</h3>
-            </div>
-            <div className="toolbar-actions">
-              <span className={`status-pill ${googleStatus.authenticated && !googleOAuthDisabled ? "" : "muted"}`}>{gmailStatus}</span>
-              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={handleConnectGmail} type="button">
-                <MailCheck size={18} />
-                <span>Connect Gmail</span>
-              </button>
-              <button className="secondary-action" disabled={isCostcoBusy || !orders.length} onClick={handleClearOrders} type="button">
-                <Trash2 size={18} />
-                <span>{isClearing ? "Clearing..." : "Clear Batch"}</span>
-              </button>
-              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders()} type="button">
-                <RefreshCw className={isImporting ? "spin" : ""} size={18} />
-                <span>{isImporting ? "Importing..." : "Import Emails"}</span>
-              </button>
-              <button className="purchase-submit" disabled={googleOAuthDisabled || !googleStatus.configured || isCostcoBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
-                <RefreshCw className={isImportingHistory ? "spin" : ""} size={18} />
-                <span>{isImportingHistory ? "Importing..." : "Import All History"}</span>
-              </button>
-            </div>
-          </section>
-
-          <Panel eyebrow="Gmail records" title="Order Email History" aside={orderTableAside}>
-            <DataTable columns={columns.costcoOrders} rows={visibleOrders} sortableColumns={costcoSortableOrderColumns} />
-          </Panel>
-        </>
-      ) : null}
-
-      {activeCostcoTab === "Manual Pulls" ? (
-        <Panel eyebrow="Google Sheets / Excel" title="Manual Pull Order Rows" aside={`${visibleManualPulls.length} rows`}>
-          <DataTable columns={columns.costcoCombinedOrders} rows={visibleManualPulls} />
-          {visibleManualPulls.length ? null : (
-            <p className="table-footnote">Manual pull rows will appear here once the Google Sheets or Excel reader is connected.</p>
-          )}
-        </Panel>
-      ) : null}
-
-      {activeCostcoTab === "Combined Table" ? (
-        <Panel eyebrow="All sources" title="Combined Costco Orders" aside={`${visibleCombinedOrders.length} rows`}>
-          <DataTable columns={columns.costcoCombinedOrders} rows={visibleCombinedOrders} sortableColumns={["source", "status", "item", "date"]} />
-        </Panel>
-      ) : null}
-
       {activeCostcoTab === "Rewards Planner" ? (
-        <CostcoRewardsTab query={query} />
+        <CostcoRewardsTab query={query} rewardKpis={liveCostcoRewardKpis} rewardRows={liveCostcoRewardRows} />
       ) : null}
 
       {activeCostcoTab === "Renewals" ? (
         <CostcoRenewalsTab reminders={visibleRenewalReminders} onSendReminder={handleSendRenewalReminder} />
       ) : null}
 
-      {activeCostcoTab === "Google Sheets" ? (
-        <SpreadsheetSourceWorkspace
-          fallbackColumns={columns.costcoOrders}
-          fallbackRows={costco.orders}
-          query={query}
-          sourceId="costco"
-          title="Costco Sheets"
-        />
-      ) : null}
-
     </>
   );
 }
 
-function CostcoRewardsTab({ query }) {
-  const rewardRows = filterRows(costcoRewardRows, query);
-  const progressItems = rewardRows.map((row) => ({
+function CostcoRewardsTab({ query, rewardKpis = costcoRewardKpis, rewardRows = costcoRewardRows }) {
+  const visibleRewardRows = filterRows(rewardRows, query);
+  const progressItems = visibleRewardRows.map((row) => ({
     account: `${row.account} · ${row.membership}`,
     current: row.reward,
     target: formatCurrency(COSTCO_EXECUTIVE_REWARD_CAP),
@@ -1247,10 +926,10 @@ function CostcoRewardsTab({ query }) {
 
   return (
     <>
-      <KpiGrid items={costcoRewardKpis} compact />
+      <KpiGrid items={rewardKpis} compact />
       <section className="content-grid wide-left">
-        <Panel eyebrow="Reward planner" title="Executive Reward Accounts" aside={`${rewardRows.length} tracked`}>
-          <DataTable columns={columns.costcoRewards} rows={rewardRows} />
+        <Panel eyebrow="Reward planner" title="Executive Reward Accounts" aside={`${visibleRewardRows.length} tracked`}>
+          <DataTable columns={columns.costcoRewards} rows={visibleRewardRows} />
         </Panel>
 
         <Panel eyebrow="Rule set" title="Executive 2% Reward">
@@ -1390,7 +1069,12 @@ function CostcoAccountsTab({ accounts, onSaveAccount, onSelectAccount, selectedA
   ];
 
   function updateDraftField(field, value) {
-    setDraftAccount((current) => buildCostcoAccountFromRaw({ ...current, raw: { ...(current?.raw || {}), [field]: value } }));
+    setDraftAccount((current) => {
+      const raw = { ...(current?.raw || {}), [field]: value };
+      const sourceField = costcoAccountSourceField(field, raw);
+      if (sourceField) raw[sourceField] = value;
+      return buildCostcoAccountFromRaw({ ...current, raw });
+    });
   }
 
   async function handleSave(event) {
@@ -1515,113 +1199,15 @@ function CostcoAccountsTab({ accounts, onSaveAccount, onSelectAccount, selectedA
 }
 
 function TravelPage({ query }) {
-  const [sheets, setSheets] = useState(fallbackTravelSheets);
-  const [masterDataSheets, setMasterDataSheets] = useState([]);
   const [activeTravelTab, setActiveTravelTab] = useState("Dashboard");
-  const [activeMasterDataTab, setActiveMasterDataTab] = useState(travelMasterDataSheetNames[0]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isTravelLogOpen, setIsTravelLogOpen] = useState(false);
-  const [lastFetchedAt, setLastFetchedAt] = useState("");
-  const [masterDataFetchedAt, setMasterDataFetchedAt] = useState("");
-  const [masterDataError, setMasterDataError] = useState("");
-  const { notifyError, notifySuccess } = useToast();
-
-  async function loadTravelData({ silent = false } = {}) {
-    if (!silent) setIsLoading(true);
-
-    try {
-      const [travelResult, masterDataResult] = await Promise.allSettled([listTravelSheets(), listTravelMasterData()]);
-      const fetchedAt = new Date().toISOString();
-
-      if (travelResult.status === "fulfilled") {
-        setSheets(mergeTravelSheets(travelResult.value.sheets));
-        setLastFetchedAt(travelResult.value.fetchedAt || fetchedAt);
-      }
-
-      if (masterDataResult.status === "fulfilled") {
-        setMasterDataSheets(masterDataResult.value.sheets || []);
-        setMasterDataFetchedAt(masterDataResult.value.fetchedAt || fetchedAt);
-        setMasterDataError("");
-      } else {
-        const message = masterDataResult.reason?.message || "Could not load travel master data.";
-        setMasterDataError(message);
-        if (!silent) notifyError("Could not load travel master data.", message);
-      }
-
-      if (travelResult.status === "rejected") {
-        throw travelResult.reason;
-      }
-
-      if (silent) notifySuccess("Travel data refreshed.");
-    } catch (error) {
-      console.error("Failed to load travel spreadsheet", error);
-      notifyError("Could not load travel spreadsheet.", error.message);
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    async function loadInitialTravelData() {
-      setIsLoading(true);
-
-      try {
-        const [travelResult, masterDataResult] = await Promise.allSettled([listTravelSheets(), listTravelMasterData()]);
-        const fetchedAt = new Date().toISOString();
-        if (!isCurrent) return;
-
-        if (travelResult.status === "fulfilled") {
-          setSheets(mergeTravelSheets(travelResult.value.sheets));
-          setLastFetchedAt(travelResult.value.fetchedAt || fetchedAt);
-        }
-
-        if (masterDataResult.status === "fulfilled") {
-          setMasterDataSheets(masterDataResult.value.sheets || []);
-          setMasterDataFetchedAt(masterDataResult.value.fetchedAt || fetchedAt);
-          setMasterDataError("");
-        } else {
-          const message = masterDataResult.reason?.message || "Could not load travel master data.";
-          setMasterDataError(message);
-          notifyError("Could not load travel master data.", message);
-        }
-
-        if (travelResult.status === "rejected") {
-          throw travelResult.reason;
-        }
-      } catch (error) {
-        console.error("Failed to load travel spreadsheet", error);
-        if (isCurrent) notifyError("Could not load travel spreadsheet.", error.message);
-      } finally {
-        if (isCurrent) setIsLoading(false);
-      }
-    }
-
-    loadInitialTravelData();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [notifyError]);
-
-  const sheetMap = useMemo(() => new Map(sheets.map((sheet) => [sheet.name, sheet])), [sheets]);
-  const masterDataMap = useMemo(() => new Map(masterDataSheets.map((sheet) => [sheet.name, sheet])), [masterDataSheets]);
+  const sheetMap = useMemo(() => new Map(fallbackTravelSheets.map((sheet) => [sheet.name, sheet])), []);
   const tripsSheet = sheetMap.get("Trips") || fallbackTravelSheets[0];
   const flightsSheet = sheetMap.get("Flights") || fallbackTravelSheets[1];
   const certificatesSheet = sheetMap.get("Certificates_Awards") || fallbackTravelSheets[2];
   const activeSheet = sheetMap.get(activeTravelTab);
-  const isMasterDataTab = activeTravelTab === travelMasterDataTab;
-  const masterDataTabs = masterDataSheets.length ? masterDataSheets.map((sheet) => sheet.name) : travelMasterDataSheetNames;
-  const activeMasterDataSheet = masterDataMap.get(activeMasterDataTab) || masterDataSheets[0] || null;
-  const activeMasterDataSheetName = activeMasterDataSheet?.name || activeMasterDataTab;
-  const activeMasterDataRows = filterRows(activeMasterDataSheet?.rows || [], query);
-  const activeMasterDataColumns = getVisibleMasterDataColumns(activeMasterDataSheet);
-  const masterDataRowCount = masterDataSheets.reduce((total, sheet) => total + (sheet.rowCount || sheet.rows?.length || 0), 0);
   const activeSheetRows = filterRows(activeSheet?.rows || [], query);
   const travelKpis = buildTravelKpis({ tripsSheet, flightsSheet, certificatesSheet });
   const expiringAwards = getExpiringTravelRows(certificatesSheet.rows);
-  const statusText = isLoading ? "Loading" : lastFetchedAt ? "Sheets connected" : "Ready";
 
   return (
     <>
@@ -1629,22 +1215,12 @@ function TravelPage({ query }) {
 
       <section className="travel-command">
         <div>
-          <p className="eyebrow">Google Sheets</p>
+          <p className="eyebrow">Travel</p>
           <h3>Travel Planner Dashboard</h3>
-          <span>Trips · Flights · Certificates_Awards · read-only master data</span>
+          <span>Trips · Flights · Certificates and awards</span>
         </div>
         <div className="toolbar-actions">
-          <span className={`status-pill ${lastFetchedAt ? "" : "muted"}`}>{statusText}</span>
-          <button className="secondary-action" disabled={isLoading} onClick={() => loadTravelData({ silent: true })} type="button">
-            <RefreshCw className={isLoading ? "spin" : ""} size={18} />
-            <span>{isLoading ? "Refreshing..." : "Refresh"}</span>
-          </button>
-          {!isMasterDataTab ? (
-            <button className="purchase-submit" onClick={() => setIsTravelLogOpen(true)} type="button">
-              <Plus size={18} />
-              <span>Add Row</span>
-            </button>
-          ) : null}
+          <span className="status-pill muted">Local view</span>
         </div>
       </section>
 
@@ -1687,7 +1263,7 @@ function TravelPage({ query }) {
         </>
       ) : null}
 
-      {activeTravelTab !== "Dashboard" && !isMasterDataTab && activeSheet ? (
+      {activeTravelTab !== "Dashboard" && activeSheet ? (
         <Panel eyebrow="Spreadsheet rows" title={activeTravelTab} aside={`${activeSheetRows.length} rows`}>
           <DataTable
             columns={getVisibleTravelColumns(activeSheet)}
@@ -1695,40 +1271,6 @@ function TravelPage({ query }) {
             sortableColumns={getVisibleTravelColumns(activeSheet).slice(0, 4)}
           />
         </Panel>
-      ) : null}
-
-      {isMasterDataTab ? (
-        <Panel eyebrow="Read-only master workbook" title="Travel Reference Data" aside={`${masterDataRowCount} rows`}>
-          <div className="reference-toolbar">
-            <span className="status-pill">Read only</span>
-            <span className={`status-pill ${masterDataFetchedAt ? "" : "muted"}`}>
-              {masterDataFetchedAt ? "Master sheet connected" : "Waiting for master sheet"}
-            </span>
-          </div>
-
-          <TabStrip labels={masterDataTabs} activeLabel={activeMasterDataSheetName} onSelect={setActiveMasterDataTab} />
-
-          {masterDataError ? <p className="empty-copy">Master data unavailable: {masterDataError}</p> : null}
-
-          {activeMasterDataColumns.length ? (
-            <DataTable
-              columns={activeMasterDataColumns}
-              rows={activeMasterDataRows}
-              sortableColumns={activeMasterDataColumns.slice(0, 4)}
-            />
-          ) : (
-            <p className="empty-copy">No reference rows loaded for {activeMasterDataSheetName}.</p>
-          )}
-        </Panel>
-      ) : null}
-
-      {isTravelLogOpen && !isMasterDataTab ? (
-        <TravelLogModal
-          activeSheetName={activeTravelTab === "Dashboard" ? "Trips" : activeTravelTab}
-          onClose={() => setIsTravelLogOpen(false)}
-          onSaved={() => loadTravelData({ silent: false })}
-          sheets={sheets}
-        />
       ) : null}
     </>
   );
@@ -1775,238 +1317,22 @@ function TravelActionList({ certificates }) {
   );
 }
 
-function TravelLogModal({ activeSheetName, onClose, onSaved, sheets }) {
-  const initialSheetName = travelSheetNames.includes(activeSheetName) ? activeSheetName : "Trips";
-  const [sheetName, setSheetName] = useState(initialSheetName);
-  const [values, setValues] = useState({});
-  const [isSaving, setIsSaving] = useState(false);
-  const { notifyError, notifySuccess } = useToast();
-  const sheet = sheets.find((item) => item.name === sheetName) || fallbackTravelSheets.find((item) => item.name === sheetName);
-  const headers = getVisibleTravelColumns(sheet);
-
-  useEffect(() => {
-    setValues({});
-  }, [sheetName]);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setIsSaving(true);
-
-    try {
-      await appendTravelSheetRow({ sheetName, values });
-      notifySuccess(`Added row to ${sheetName}.`);
-      await onSaved?.();
-      onClose();
-    } catch (error) {
-      console.error("Failed to append travel row", error);
-      notifyError("Could not add travel row.", error.message);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  return (
-    <div className="logger-modal" role="presentation">
-      <button className="logger-modal__backdrop" aria-label="Close travel logger" onClick={onClose} type="button" />
-      <form aria-modal="true" className="logger-modal__surface travel-log-panel" onSubmit={handleSubmit} role="dialog">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Google Sheets row</p>
-            <h3>Add Travel Row</h3>
-          </div>
-          <button className="icon-button" onClick={onClose} type="button" aria-label="Close travel logger">
-            <X size={18} />
-          </button>
-        </div>
-
-        <label className="travel-field travel-field-full">
-          <span>Sheet</span>
-          <select onChange={(event) => setSheetName(event.target.value)} value={sheetName}>
-            {travelSheetNames.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="travel-form-grid">
-          {headers.map((header) => (
-            <label className={`travel-field ${isLongTravelField(header) ? "travel-field-full" : ""}`} key={header}>
-              <span>{header}</span>
-              {isLongTravelField(header) ? (
-                <textarea
-                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
-                  rows={3}
-                  value={values[header] || ""}
-                />
-              ) : (
-                <input
-                  onChange={(event) => setValues((current) => ({ ...current, [header]: event.target.value }))}
-                  type={getTravelInputType(header)}
-                  value={values[header] || ""}
-                />
-              )}
-            </label>
-          ))}
-        </div>
-
-        <div className="travel-modal-actions">
-          <button className="secondary-action" onClick={onClose} type="button">
-            Cancel
-          </button>
-          <button className="purchase-submit" disabled={isSaving} type="submit">
-            <Plus size={18} />
-            <span>{isSaving ? "Adding..." : "Add Row"}</span>
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function UsMintPage({ googleOAuthDisabled, query }) {
-  const [orders, setOrders] = useState([]);
+function UsMintPage({ query }) {
   const [activeUsMintTab, setActiveUsMintTab] = useState("Accounts");
   const [selectedUsMintAccountId, setSelectedUsMintAccountId] = useState(usMintAccounts[0]?.id || "");
-  const [googleStatus, setGoogleStatus] = useState({ authenticated: false, configured: false });
-  const [importResult, setImportResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isClearing, setIsClearing] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isImportingHistory, setIsImportingHistory] = useState(false);
-  const { notifyError, notifySuccess } = useToast();
-
-  useEffect(() => {
-    let isCurrent = true;
-
-    async function loadUsMintData() {
-      setIsLoading(true);
-
-      const [statusResult, ordersResult] = await Promise.allSettled([
-        googleOAuthDisabled ? Promise.resolve({ authenticated: false, configured: false, disabled: true }) : getGoogleOAuthStatus(),
-        listUsMintOrders({ limit: 1000 })
-      ]);
-
-      if (!isCurrent) return;
-
-      if (statusResult.status === "fulfilled") {
-        setGoogleStatus(statusResult.value);
-      } else {
-        console.error("Failed to load Google OAuth status", statusResult.reason);
-        notifyError("Could not load Google OAuth status.", statusResult.reason.message);
-      }
-
-      if (ordersResult.status === "fulfilled") {
-        setOrders(ordersResult.value.orders || []);
-      } else {
-        console.error("Failed to load US Mint data", ordersResult.reason);
-        notifyError("Could not load US Mint order rows.", ordersResult.reason.message);
-      }
-
-      setIsLoading(false);
-    }
-
-    loadUsMintData();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [googleOAuthDisabled, notifyError]);
-
-  const visibleOrders = filterRows(orders, query);
   const visibleUsMintAccounts = useMemo(() => filterRows(usMintAccounts, query), [query]);
   const selectedUsMintAccount =
     visibleUsMintAccounts.find((account) => account.id === selectedUsMintAccountId) ||
     visibleUsMintAccounts[0] ||
     usMintAccounts.find((account) => account.id === selectedUsMintAccountId) ||
     usMintAccounts[0];
-  const orderTotal = orders.reduce((total, order) => total + (Number(order.totalAmount) || 0), 0);
-  const confirmedCount = orders.filter((order) => order.status === "Confirmed").length;
   const activeAccountCount = usMintAccounts.filter((account) => account.status === "Active").length;
-  const orderTableAside = importResult
-    ? formatImportResultAside(importResult)
-    : orders.length
-      ? `${orders.length} imported`
-      : "Confirmed Gmail orders";
-  const isUsMintBusy = isClearing || isImporting || isImportingHistory;
-  const gmailStatus = isLoading
-    ? "Loading"
-    : googleOAuthDisabled || googleStatus.disabled
-      ? "OAuth disabled"
-      : googleStatus.authenticated
-      ? "Gmail connected"
-      : googleStatus.configured
-        ? "Gmail ready"
-        : "OAuth missing";
   const usMintSummaryItems = [
     { label: "Accounts", value: String(usMintAccounts.length), detail: `${activeAccountCount} active profiles`, tone: "blue" },
-    { label: "Email Orders", value: String(orders.length), detail: `${confirmedCount} confirmed`, tone: "green" },
-    { label: "Order Total", value: formatCurrency(orderTotal), detail: "Imported confirmed totals", tone: "violet" },
-    { label: "Gmail", value: gmailStatus, detail: "orders@email.usmint.gov", tone: "amber" }
+    { label: "Releases", value: String(usMint.releases.length), detail: "Release calendar rows", tone: "green" },
+    { label: "Subscriptions", value: String(usMint.subscriptions.length), detail: "Tracked account coverage", tone: "violet" },
+    { label: "Buyer Sales", value: "Planned", detail: "Manual workspace", tone: "amber" }
   ];
-
-  async function handleConnectGmail() {
-    return connectGoogleOAuth({ googleOAuthDisabled, notifyError, notifySuccess, setGoogleStatus });
-  }
-
-  async function handleImportOrders({ allHistory = false } = {}) {
-    if (googleOAuthDisabled) {
-      notifyError("Google OAuth is disabled.", "Turn it back on in Settings before importing Gmail.");
-      return;
-    }
-
-    let latestStatus = await getGoogleOAuthStatus();
-    setGoogleStatus(latestStatus);
-
-    if (!latestStatus.authenticated) {
-      latestStatus = await handleConnectGmail();
-      if (!latestStatus?.authenticated) return;
-    }
-
-    const setWorking = allHistory ? setIsImportingHistory : setIsImporting;
-    setWorking(true);
-
-    try {
-      const result = await importUsMintOrders({
-        limit: allHistory ? 10000 : 5000,
-        limitPerBatch: allHistory ? 1000 : "",
-        historyStartYear: allHistory ? 2010 : "",
-        query: US_MINT_CONFIRMED_ORDER_GMAIL_QUERY
-      });
-      const ordersResult = await listUsMintOrders({ limit: 1000 });
-      setOrders(ordersResult.orders || result.orders || []);
-      setImportResult(result);
-      notifySuccess(`Scanned ${result.scanned} US Mint emails; imported ${result.imported}.`);
-    } catch (error) {
-      console.error("Failed to import US Mint orders", error);
-      notifyError("US Mint import failed.", error.message);
-    } finally {
-      setWorking(false);
-    }
-  }
-
-  async function handleClearOrders() {
-    const shouldClear = window.confirm(
-      "Clear imported US Mint order rows from this dashboard? Gmail emails will not be deleted."
-    );
-
-    if (!shouldClear) return;
-
-    setIsClearing(true);
-
-    try {
-      const result = await clearUsMintOrders();
-      setOrders([]);
-      setImportResult(null);
-      notifySuccess(`Cleared ${result.deleted || 0} imported US Mint order rows.`);
-    } catch (error) {
-      console.error("Failed to clear US Mint orders", error);
-      notifyError("Could not clear US Mint order rows.", error.message);
-    } finally {
-      setIsClearing(false);
-    }
-  }
 
   return (
     <>
@@ -2019,40 +1345,6 @@ function UsMintPage({ googleOAuthDisabled, query }) {
           onSelectAccount={setSelectedUsMintAccountId}
           selectedAccount={selectedUsMintAccount}
         />
-      ) : null}
-
-      {activeUsMintTab === "Email Orders" ? (
-        <>
-          <section className="receipt-toolbar">
-            <div>
-              <p className="eyebrow">Gmail OAuth</p>
-              <h3>US Mint Confirmed Orders</h3>
-            </div>
-            <div className="toolbar-actions">
-              <span className={`status-pill ${googleStatus.authenticated && !googleOAuthDisabled ? "" : "muted"}`}>{gmailStatus}</span>
-              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={handleConnectGmail} type="button">
-                <MailCheck size={18} />
-                <span>Connect Gmail</span>
-              </button>
-              <button className="secondary-action" disabled={isUsMintBusy || !orders.length} onClick={handleClearOrders} type="button">
-                <Trash2 size={18} />
-                <span>{isClearing ? "Clearing..." : "Clear Batch"}</span>
-              </button>
-              <button className="secondary-action" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders()} type="button">
-                <RefreshCw className={isImporting ? "spin" : ""} size={18} />
-                <span>{isImporting ? "Importing..." : "Import Emails"}</span>
-              </button>
-              <button className="purchase-submit" disabled={googleOAuthDisabled || !googleStatus.configured || isUsMintBusy} onClick={() => handleImportOrders({ allHistory: true })} type="button">
-                <RefreshCw className={isImportingHistory ? "spin" : ""} size={18} />
-                <span>{isImportingHistory ? "Importing..." : "Import All History"}</span>
-              </button>
-            </div>
-          </section>
-
-          <Panel eyebrow="Gmail records" title="Confirmed Order History" aside={orderTableAside}>
-            <DataTable columns={columns.usMintOrders} rows={visibleOrders} />
-          </Panel>
-        </>
       ) : null}
 
       {activeUsMintTab === "Release Calendar" ? (
@@ -2076,18 +1368,8 @@ function UsMintPage({ googleOAuthDisabled, query }) {
 
       {["Expected Charges", "Buyer Sales"].includes(activeUsMintTab) ? (
         <Panel eyebrow={activeUsMintTab} title={`${activeUsMintTab} Workspace`}>
-          <p className="empty-copy">Connect the confirmed order import first, then this workspace can be filled from order and release data.</p>
+          <p className="empty-copy">This workspace is ready for manually curated order and release data.</p>
         </Panel>
-      ) : null}
-
-      {activeUsMintTab === "Google Sheets" ? (
-        <SpreadsheetSourceWorkspace
-          fallbackColumns={columns.releases}
-          fallbackRows={usMint.releases}
-          query={query}
-          sourceId="usMint"
-          title="US Mint Sheets"
-        />
       ) : null}
     </>
   );
@@ -2185,13 +1467,9 @@ function DellPage({ query }) {
     <>
       <TabStrip labels={["Accounts", "Orders", "Items", "Rewards", "Fulfillment", "Sales"]} />
       <KpiGrid items={dell.summary} compact />
-      <SpreadsheetSourceWorkspace
-        fallbackColumns={columns.dellOrders}
-        fallbackRows={dell.orders}
-        query={query}
-        sourceId="dell"
-        title="Dell Sheets"
-      />
+      <Panel eyebrow="Local rows" title="Dell Orders" aside={`${dell.orders.length} rows`}>
+        <DataTable columns={columns.dellOrders} rows={filterRows(dell.orders, query)} />
+      </Panel>
     </>
   );
 }
@@ -2207,13 +1485,9 @@ function CommoditiesPage({ query }) {
   return (
     <>
       <KpiGrid items={combinedSummary} compact />
-      <SpreadsheetSourceWorkspace
-        fallbackColumns={columns.inventory}
-        fallbackRows={commodities.inventory}
-        query={query}
-        sourceId="commodities"
-        title="Commodities Sheets"
-      />
+      <Panel eyebrow="Local rows" title="Commodities Inventory" aside={`${commodities.inventory.length} rows`}>
+        <DataTable columns={columns.inventory} rows={filterRows(commodities.inventory, query)} />
+      </Panel>
     </>
   );
 }
@@ -2331,38 +1605,29 @@ function ReceiptsPage({ query }) {
 
 function BuyersPage({ query }) {
   return (
-    <SpreadsheetSourceWorkspace
-      fallbackColumns={["name", "buys", "pending", "balance", "contact", "status", "lastPurchase"]}
-      fallbackRows={buyers}
-      query={query}
-      sourceId="buyers"
-      title="Buyer Sheets"
-    />
+    <Panel eyebrow="Local rows" title="Buyers" aside={`${buyers.length} rows`}>
+      <DataTable
+        columns={["name", "buys", "pending", "balance", "contact", "status", "lastPurchase"]}
+        rows={filterRows(buyers, query)}
+      />
+    </Panel>
   );
 }
 
 function RewardsPage({ query }) {
   return (
-    <SpreadsheetSourceWorkspace
-      fallbackColumns={columns.rewards}
-      fallbackRows={rewards}
-      query={query}
-      sourceId="rewards"
-      title="Rewards Sheets"
-    />
+    <Panel eyebrow="Local rows" title="Rewards" aside={`${rewards.length} rows`}>
+      <DataTable columns={columns.rewards} rows={filterRows(rewards, query)} />
+    </Panel>
   );
 }
 
 function AlertsPage({ query }) {
   return (
     <section className="content-grid wide-left">
-      <SpreadsheetSourceWorkspace
-        fallbackColumns={columns.alerts}
-        fallbackRows={alerts}
-        query={query}
-        sourceId="alerts"
-        title="Alerts Sheets"
-      />
+      <Panel eyebrow="Local rows" title="Alerts" aside={`${alerts.length} rows`}>
+        <DataTable columns={columns.alerts} rows={filterRows(alerts, query)} />
+      </Panel>
       <Panel eyebrow="Rules" title="Alert Types">
         <div className="rule-list">
           {alertRules.map((rule) => (
@@ -2376,37 +1641,16 @@ function AlertsPage({ query }) {
 
 function ReportsPage({ query }) {
   return (
-    <SpreadsheetSourceWorkspace
-      fallbackColumns={["name", "metric", "status", "action"]}
-      fallbackRows={reports}
-      query={query}
-      sourceId="reports"
-      title="Report Sheets"
-    />
+    <Panel eyebrow="Local rows" title="Reports" aside={`${reports.length} rows`}>
+      <DataTable columns={["name", "metric", "status", "action"]} rows={filterRows(reports, query)} />
+    </Panel>
   );
 }
 
-function SettingsPage({ googleOAuthDisabled, onToggleGoogleOAuthDisabled, query }) {
+function SettingsPage({ query }) {
   return (
     <section className="content-grid wide-left">
-      <Panel eyebrow="Global controls" title="Connection Settings">
-        <div className="settings-control-row">
-          <div>
-            <strong>Disable Google OAuth client</strong>
-            <p>Blocks Gmail OAuth connection and Gmail imports from Costco and US Mint. Google Sheets service-account reads and writes stay available.</p>
-          </div>
-          <label className="toggle-control">
-            <input
-              checked={googleOAuthDisabled}
-              onChange={(event) => onToggleGoogleOAuthDisabled(event.target.checked)}
-              type="checkbox"
-            />
-            <span>{googleOAuthDisabled ? "Disabled" : "Enabled"}</span>
-          </label>
-        </div>
-      </Panel>
-
-      <Panel eyebrow="Import sources" title="Sync Plan">
+      <Panel eyebrow="Data source" title="Costco Workbook">
         <DataTable columns={columns.settings} rows={filterRows(syncSettings, query)} />
       </Panel>
     </section>
@@ -2556,51 +1800,269 @@ function applyCostcoAccountEdits(accounts, edits) {
 }
 
 function buildCostcoAccountsFromSheetSource(sourceState) {
-  const accountsSheet = sourceState.sheets?.find((sheet) => /accounts?/i.test(sheet.name));
+  const accountsSheet = sourceState.sheets?.find((sheet) => /account information|accounts?/i.test(sheet.name));
   if (!sourceState.configured || !accountsSheet?.rows?.length) return [];
 
-  return accountsSheet.rows.map((row, index) =>
-    buildCostcoAccountFromRaw({
-      id: row["Membership #"] || row["Sign-In Email"] || row.id || `costco-sheet-account-${index}`,
-      raw: row,
+  const rewardsByMembership = buildCostcoRewardsByMembership(sourceState);
+
+  return accountsSheet.rows.map((row, index) => {
+    const membershipNumber = getCostcoMembershipNumber(row);
+    const normalizedRaw = normalizeCostcoAccountRaw(row, rewardsByMembership.get(membershipNumber));
+
+    return buildCostcoAccountFromRaw({
+      id: normalizedRaw["Membership #"] || normalizedRaw["Sign-In Email"] || row.id || `costco-sheet-account-${index}`,
+      raw: normalizedRaw,
       sheetName: accountsSheet.name,
       sheetRowNumber: row.id
-    })
-  );
+    });
+  });
 }
 
 function buildCostcoAccountFromRaw(account) {
   const raw = account?.raw || account || {};
-  const id = account?.id || raw["Membership #"] || raw["Sign-In Email"] || raw.id || "costco-account";
+  const membershipNumber = getCostcoAccountRawValue(raw, ["Membership #"], account?.membershipNumber);
+  const signInEmail = getCostcoAccountRawValue(raw, ["Sign-In Email", "Email"], account?.signInEmail);
+  const id = account?.id || membershipNumber || signInEmail || raw.id || "costco-account";
 
   return {
     ...account,
     id,
-    membershipNumber: raw["Membership #"] || account?.membershipNumber || "",
-    role: raw.Role || account?.role || "",
-    linkedPrimary: raw["Linked Primary #"] || account?.linkedPrimary || "",
-    membershipType: raw["Membership Type"] || account?.membershipType || "",
-    executive: raw["Executive?"] || account?.executive || "",
-    status: raw.Status || account?.status || "",
-    ownerName: raw["Owner Name"] || account?.ownerName || "",
-    signInEmail: raw["Sign-In Email"] || account?.signInEmail || "",
-    profileEmail: raw["Profile Email"] || account?.profileEmail || "",
-    phone: raw.Phone || account?.phone || "",
-    address: raw.Address || account?.address || "",
-    memberSince: raw["Member Since"] || account?.memberSince || "",
-    expirationDate: raw["Expiration Date"] || account?.expirationDate || "",
-    renewalOpens: raw["Renewal Opens"] || account?.renewalOpens || "",
-    rewardCycleStart: raw["Reward Cycle Start"] || account?.rewardCycleStart || "",
-    estimatedReward: raw["Estimated 2% Reward"] || account?.estimatedReward || "",
-    remainingToCap: raw["Remaining to $1,250 Cap"] || account?.remainingToCap || "",
-    spendNeededToCap: raw["Spend Needed to Cap"] || account?.spendNeededToCap || "",
-    rewardLastUpdated: raw["Reward Last Updated"] || account?.rewardLastUpdated || "",
-    accountManager: raw["Account Manager / Primary Member"] || account?.accountManager || "",
-    householdMember: raw["Household Member"] || account?.householdMember || "",
-    notes: raw.Notes || account?.notes || "",
-    needsVerification: raw["Needs Verification?"] || account?.needsVerification || "",
+    membershipNumber,
+    role: getCostcoAccountRawValue(raw, ["Role"], account?.role),
+    linkedPrimary: getCostcoAccountRawValue(raw, ["Linked Primary #"], account?.linkedPrimary),
+    membershipType: getCostcoAccountRawValue(raw, ["Membership Type", "Type"], account?.membershipType),
+    executive: getCostcoAccountRawValue(raw, ["Executive?"], account?.executive),
+    status: getCostcoAccountRawValue(raw, ["Status"], account?.status),
+    ownerName: getCostcoAccountRawValue(raw, ["Owner Name", "Account Owner", "Name"], account?.ownerName),
+    signInEmail,
+    profileEmail: getCostcoAccountRawValue(raw, ["Profile Email", "Email"], account?.profileEmail || signInEmail),
+    phone: getCostcoAccountRawValue(raw, ["Phone"], account?.phone),
+    address: getCostcoAccountRawValue(raw, ["Address"], account?.address),
+    memberSince: getCostcoAccountRawValue(raw, ["Member Since"], account?.memberSince),
+    expirationDate: getCostcoAccountRawValue(raw, ["Expiration Date", "Expiration"], account?.expirationDate),
+    renewalOpens: getCostcoAccountRawValue(raw, ["Renewal Opens"], account?.renewalOpens),
+    rewardCycleStart: getCostcoAccountRawValue(raw, ["Reward Cycle Start", "Earned Since"], account?.rewardCycleStart),
+    estimatedReward: getCostcoAccountRawValue(raw, ["Estimated 2% Reward", "Costco Confirmed"], account?.estimatedReward),
+    remainingToCap: getCostcoAccountRawValue(raw, ["Remaining to $1,250 Cap"], account?.remainingToCap),
+    spendNeededToCap: getCostcoAccountRawValue(raw, ["Spend Needed to Cap"], account?.spendNeededToCap),
+    rewardLastUpdated: getCostcoAccountRawValue(raw, ["Reward Last Updated"], account?.rewardLastUpdated),
+    accountManager: getCostcoAccountRawValue(raw, ["Account Manager / Primary Member"], account?.accountManager),
+    householdMember: getCostcoAccountRawValue(raw, ["Household Member"], account?.householdMember),
+    notes: getCostcoAccountRawValue(raw, ["Notes"], account?.notes),
+    needsVerification: getCostcoAccountRawValue(raw, ["Needs Verification?"], account?.needsVerification),
     raw
   };
+}
+
+function buildCostcoRewardsByMembership(sourceState) {
+  const rewardsSheet = sourceState.sheets?.find((sheet) => /rewards?/i.test(sheet.name));
+  const rewardsByMembership = new Map();
+
+  for (const row of rewardsSheet?.rows || []) {
+    const membershipNumber = getCostcoMembershipNumber(row);
+    if (membershipNumber) rewardsByMembership.set(membershipNumber, row);
+  }
+
+  return rewardsByMembership;
+}
+
+function normalizeCostcoAccountRaw(row, rewardRow = {}) {
+  const membershipNumber = getCostcoMembershipNumber(row);
+  const membershipType = row["Membership Type"] || row.Type || "";
+  const rewardAmount = firstMoneyValue([
+    row["Estimated 2% Reward"],
+    rewardRow?.["Costco Confirmed"],
+    rewardRow?.["Rewards Calculated 2%"],
+    rewardRow?.["Rewards Calc 2% (Period)"]
+  ]);
+  const hasRewardAmount = rewardAmount !== null;
+  const remainingToCap = hasRewardAmount ? Math.max(COSTCO_EXECUTIVE_REWARD_CAP - rewardAmount, 0) : null;
+  const spendNeededToCap = remainingToCap !== null ? remainingToCap / COSTCO_EXECUTIVE_REWARD_RATE : null;
+
+  return {
+    ...row,
+    "Membership #": membershipNumber,
+    Role: row.Role || deriveCostcoAccountRole(row),
+    "Membership Type": membershipType,
+    "Executive?": row["Executive?"] || (/executive/i.test(membershipType) ? "Yes" : "No"),
+    Status: row.Status || "",
+    "Owner Name": row["Owner Name"] || row["Account Owner"] || row.Name || "",
+    "Sign-In Email": row["Sign-In Email"] || row.Email || "",
+    "Profile Email": row["Profile Email"] || row.Email || "",
+    Phone: row.Phone || "",
+    Address: row.Address || "",
+    "Member Since": row["Member Since"] || "",
+    "Expiration Date": row["Expiration Date"] || row.Expiration || "",
+    "Reward Cycle Start": row["Reward Cycle Start"] || row["Earned Since"] || rewardRow?.["Earned Since"] || "",
+    "Estimated 2% Reward": hasRewardAmount ? formatCurrency(rewardAmount) : row["Estimated 2% Reward"] || "",
+    "Remaining to $1,250 Cap": hasRewardAmount ? formatCurrency(remainingToCap) : row["Remaining to $1,250 Cap"] || "",
+    "Spend Needed to Cap": spendNeededToCap !== null ? formatCurrency(spendNeededToCap) : row["Spend Needed to Cap"] || "",
+    "Account Manager / Primary Member": row["Account Manager / Primary Member"] || row["Account Owner"] || row.Name || "",
+    "Needs Verification?": row["Needs Verification?"] || (/verify|activation/i.test(row.Status || "") ? "Yes" : "No")
+  };
+}
+
+function buildCostcoRewardRows(accounts) {
+  return accounts
+    .filter((account) => account.executive === "Yes" || toMoneyAmount(account.estimatedReward) > 0)
+    .map((account) => {
+      const reward = Math.min(toMoneyAmount(account.estimatedReward), COSTCO_EXECUTIVE_REWARD_CAP);
+      const remaining = Math.max(COSTCO_EXECUTIVE_REWARD_CAP - reward, 0);
+      const spendNeeded = toMoneyAmount(account.spendNeededToCap) || Number((remaining / COSTCO_EXECUTIVE_REWARD_RATE).toFixed(2));
+      const progress = COSTCO_EXECUTIVE_REWARD_CAP ? Math.min((reward / COSTCO_EXECUTIVE_REWARD_CAP) * 100, 100) : 0;
+
+      return {
+        account: account.ownerName,
+        membership: account.membershipNumber || "Pending",
+        type: account.membershipType,
+        reward: formatCurrency(reward),
+        remaining: formatCurrency(remaining),
+        spendNeeded: formatCurrency(spendNeeded),
+        cycleStart: account.rewardCycleStart,
+        cycleEnd: buildCostcoRewardCycleEnd(account),
+        updated: account.rewardLastUpdated,
+        status: reward >= COSTCO_EXECUTIVE_REWARD_CAP ? "Capped" : progress >= 80 ? "Near cap" : "Tracking",
+        progress: Number(progress.toFixed(1)),
+        rewardAmount: reward,
+        remainingAmount: remaining,
+        spendNeededAmount: spendNeeded
+      };
+    });
+}
+
+function buildCostcoRewardKpis(accounts, rewardRows) {
+  const executiveAccounts = accounts.filter((account) => account.status === "Active" && account.executive === "Yes").length;
+  const totalEstimatedReward = rewardRows.reduce((total, row) => total + (row.rewardAmount || 0), 0);
+  const totalRemainingToCap = rewardRows.reduce((total, row) => total + (row.remainingAmount || 0), 0);
+  const totalSpendNeededToCap = rewardRows.reduce((total, row) => total + (row.spendNeededAmount || 0), 0);
+  const nearCapAccounts = rewardRows.filter((row) => row.progress >= 80).length;
+
+  return [
+    {
+      label: "Executive Rewards",
+      value: formatCurrency(totalEstimatedReward),
+      detail: `${executiveAccounts} active Executive reward accounts`,
+      tone: "green"
+    },
+    {
+      label: "Remaining to Cap",
+      value: formatCurrency(totalRemainingToCap),
+      detail: `${formatCurrency(totalSpendNeededToCap)} spend needed`,
+      tone: "blue"
+    },
+    {
+      label: "Near Cap",
+      value: String(nearCapAccounts),
+      detail: `${formatCurrency(COSTCO_EXECUTIVE_REWARD_CAP)} max per reward cycle`,
+      tone: "amber"
+    }
+  ];
+}
+
+function buildCostcoRenewalReminders(accounts) {
+  return accounts
+    .filter((account) => account.status === "Active" && (account.renewalOpens || account.expirationDate))
+    .map((account) => buildCostcoRenewalReminder(account))
+    .sort((left, right) => left.sortDate - right.sortDate);
+}
+
+function buildCostcoRenewalReminder(account) {
+  const renewalDate = parseCostcoAccountRenewalDate(account);
+  const expirationDate = parseTravelDate(account.expirationDate);
+  const reminderDate = renewalDate ? addDaysToDate(renewalDate, -COSTCO_RENEWAL_REMINDER_LEAD_DAYS) : null;
+  const daysUntilReminder = reminderDate ? daysUntilDate(reminderDate) : null;
+  const daysUntilRenewal = renewalDate ? daysUntilDate(renewalDate) : null;
+  const isPastDue = expirationDate ? daysUntilDate(expirationDate) < 0 : false;
+  const isVisible = isPastDue || (daysUntilReminder !== null && daysUntilReminder <= 0);
+  const renewalLabel = account.renewalOpens ? "renewal window opens" : "membership expires";
+  const renewalDateText = account.renewalOpens || account.expirationDate;
+
+  return {
+    account: account.ownerName,
+    membership: account.membershipNumber || "Pending",
+    role: account.role,
+    status: isPastDue ? "Past due" : isVisible ? "Reminder due" : "Scheduled",
+    renewalDate: renewalDateText,
+    reminderDate: reminderDate ? formatDateText(reminderDate) : "",
+    expirationDate: account.expirationDate,
+    daysUntil: daysUntilRenewal,
+    priority: isPastDue || isVisible ? "High" : daysUntilReminder !== null && daysUntilReminder <= 30 ? "Medium" : "Low",
+    action: isVisible ? "Send SMS" : "Scheduled",
+    message: `Costco renewal reminder: ${account.ownerName}'s ${account.membershipType} membership ${account.membershipNumber || "pending"} ${renewalLabel} on ${renewalDateText}. Please review/renew before it becomes past due.`,
+    phone: COSTCO_RENEWAL_REMINDER_PHONE,
+    isVisible,
+    sortDate: reminderDate?.getTime() || Number.MAX_SAFE_INTEGER
+  };
+}
+
+function buildCostcoRewardCycleEnd(account) {
+  const cycleStart = parseTravelDate(account.rewardCycleStart);
+  if (cycleStart) return formatDateText(addDaysToDate(addYearsToDate(cycleStart, 1), -1));
+  return account.renewalOpens || account.expirationDate || "";
+}
+
+function getCostcoMembershipNumber(row) {
+  return row?.["Membership #"] || extractCostcoMembershipNumber(row?.["Account Name"] || row?.Account || "");
+}
+
+function extractCostcoMembershipNumber(value) {
+  return String(value || "").match(/\b\d{9,}\b/)?.[0] || "";
+}
+
+function deriveCostcoAccountRole(row) {
+  const accountCode = row.ACC || String(row["Account Name"] || "").match(/\bACC[0-9A-Z]+\b/i)?.[0] || "";
+  return /ACC\d+[A-Z]/i.test(accountCode) ? "Household/Add-on" : "Primary";
+}
+
+function costcoAccountSourceField(field, raw) {
+  const aliases = {
+    "Owner Name": ["Owner Name", "Account Owner", "Name"],
+    "Membership Type": ["Membership Type", "Type"],
+    "Sign-In Email": ["Sign-In Email", "Email"],
+    "Profile Email": ["Profile Email", "Email"],
+    "Expiration Date": ["Expiration Date", "Expiration"],
+    "Reward Cycle Start": ["Reward Cycle Start", "Earned Since"]
+  };
+
+  return (aliases[field] || [field]).find((alias) => Object.prototype.hasOwnProperty.call(raw, alias));
+}
+
+function getCostcoAccountRawValue(raw, aliases, fallback = "") {
+  for (const alias of aliases) {
+    const value = raw?.[alias];
+    if (value !== undefined && value !== null && String(value).trim()) return value;
+  }
+
+  return fallback || "";
+}
+
+function firstMoneyValue(values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim()) return toMoneyAmount(value);
+  }
+
+  return null;
+}
+
+function toMoneyAmount(value) {
+  const amount = Number.parseFloat(String(value || "").replace(/[$,]/g, ""));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function addDaysToDate(value, days) {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function addYearsToDate(value, years) {
+  const next = new Date(value);
+  next.setFullYear(next.getFullYear() + years);
+  return next;
+}
+
+function formatDateText(value) {
+  return new Intl.DateTimeFormat("en-US", { month: "2-digit", day: "2-digit", year: "numeric" }).format(value);
 }
 
 function formatDateForInput(value) {
@@ -2701,7 +2163,7 @@ function buildProfileSnapshot(session) {
         value: String(verificationCount)
       },
       {
-        detail: "Gmail, Sheets, and upload sources",
+        detail: "Costco workbook, receipts, and local rows",
         icon: RefreshCw,
         label: "Sync Sources",
         tone: "neutral",
@@ -2805,7 +2267,7 @@ function getProfilePortfolioValue(id, context) {
 function getProfilePortfolioDetail(id) {
   const details = {
     commodities: "US Mint collectibles, accounts, and bullion inventory",
-    costco: "Memberships, renewals, rewards, and Gmail orders",
+    costco: "Memberships, renewals, rewards, and sheet transactions",
     dell: "Orders, rewards, fulfillment, and sale follow-up",
     travel: "Trips, flights, awards, and master reference data",
     usMint: "Accounts, confirmed orders, releases, and subscriptions"
@@ -3122,31 +2584,10 @@ function formatCurrency(value) {
   }).format(value || 0);
 }
 
-function formatImportResultAside(result) {
-  const batchText = result.batches?.length ? ` · ${result.batches.length} batches` : "";
-  return `Scanned ${result.scanned}, imported ${result.imported}, skipped ${result.skipped}${batchText}`;
-}
-
 function buildSmsHref(phone, message) {
   const digits = String(phone || "").replace(/\D/g, "");
   const normalizedPhone = digits.length === 10 ? `+1${digits}` : `+${digits}`;
   return `sms:${normalizedPhone}?body=${encodeURIComponent(message || "")}`;
-}
-
-function mergeTravelSheets(incomingSheets = []) {
-  const incomingByName = new Map(incomingSheets.map((sheet) => [sheet.name, sheet]));
-
-  return fallbackTravelSheets.map((fallbackSheet) => {
-    const incomingSheet = incomingByName.get(fallbackSheet.name);
-    return incomingSheet
-      ? {
-          ...fallbackSheet,
-          ...incomingSheet,
-          headers: incomingSheet.headers?.length ? incomingSheet.headers : fallbackSheet.headers,
-          rows: incomingSheet.rows || []
-        }
-      : fallbackSheet;
-  });
 }
 
 function getDefaultTravelHeaders(sheetName) {
@@ -3162,10 +2603,6 @@ function getDefaultTravelHeaders(sheetName) {
 function getVisibleTravelColumns(sheet) {
   const headers = sheet?.headers?.length ? sheet.headers : getDefaultTravelHeaders(sheet?.name);
   return headers.filter((header) => header && header !== "id");
-}
-
-function getVisibleMasterDataColumns(sheet) {
-  return (sheet?.headers || []).filter((header) => header && header !== "id");
 }
 
 function buildTravelKpis({ tripsSheet, flightsSheet, certificatesSheet }) {
@@ -3249,6 +2686,93 @@ function getTravelInputType(header) {
   if (/time/i.test(header)) return "time";
   if (/amount|budget|cost|credit|value|price|total/i.test(header)) return "number";
   return "text";
+}
+
+function getCategoricalFieldOptions(header, sheet) {
+  const observedValues = getObservedFieldValues(header, sheet);
+  const observedOptions = uniqueCategoricalOptions(observedValues);
+  const fixedOptions = getFixedCategoricalOptions(header);
+  const fallbackOptions = getFallbackCategoricalOptions(header);
+  const shouldUseSelect =
+    Boolean(fixedOptions.length) ||
+    (observedOptions.length > 0 && isLikelyCategoricalHeader(header)) ||
+    isRepeatedCategoricalValueSet(observedOptions.length, observedValues.length, header);
+
+  if (!shouldUseSelect) return [];
+
+  return uniqueCategoricalOptions([...fixedOptions, ...observedOptions, ...fallbackOptions]).slice(0, 60);
+}
+
+function getObservedFieldValues(header, sheet) {
+  return (sheet?.rows || [])
+    .map((row) => row?.[header])
+    .map((value) => String(value ?? "").trim())
+    .filter((value) => value && value.length <= 80);
+}
+
+function uniqueCategoricalOptions(values) {
+  const seen = new Set();
+  const options = [];
+
+  values.forEach((value) => {
+    const normalized = value.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    options.push(value);
+  });
+
+  return options;
+}
+
+function getFixedCategoricalOptions(header) {
+  const text = normalizeHeaderText(header);
+
+  if (text === "business/personal") return ["Business", "Personal"];
+  if (text === "executive?" || text === "executive") return ["Yes", "No", "Unknown"];
+  if (text === "needs verification?" || text === "needs verification") return ["No", "Yes"];
+  if (text === "role") return ["Primary", "Household/Add-on", "Needs Verification"];
+  if (text === "priority") return ["High", "Medium", "Low"];
+
+  return [];
+}
+
+function getFallbackCategoricalOptions(header) {
+  const text = normalizeHeaderText(header);
+
+  if (text === "status") return ["Active", "Pending", "Complete", "Review", "Inactive", "Needs Verification"];
+  if (text === "membership type") return ["Business Executive", "Gold Star Executive", "Gold Star"];
+
+  return [];
+}
+
+function isRepeatedCategoricalValueSet(optionCount, valueCount, header) {
+  if (!valueCount || isFreeformOrMeasuredHeader(header)) return false;
+  if (optionCount < 2 || optionCount > 18) return false;
+  return valueCount <= 4 || optionCount / valueCount <= 0.5;
+}
+
+function isLikelyCategoricalHeader(header) {
+  if (isFreeformOrMeasuredHeader(header)) return false;
+
+  return /\b(account|action|buyer|cadence|category|channel|method|priority|program|role|source|status|type)\b|business\/personal|executive|verification/i.test(
+    header
+  );
+}
+
+function isFreeformOrMeasuredHeader(header) {
+  const text = normalizeHeaderText(header);
+  if (!text) return true;
+  if (text === "business/personal" || text === "executive?" || text === "needs verification?") return false;
+  if (text.includes("#")) return true;
+  if (/\b(date|time|amount|budget|cost|credit|email|end|expiration|expires|id|name|number|phone|price|quantity|qty|renewal|sku|spend|start|subtotal|tax|total|value)\b/.test(text)) return true;
+  if (/\b(address|comment|comments|description|detail|details|note|notes)\b/.test(text)) return true;
+  if (/\breward\b/.test(text) && !/\b(category|status|type)\b/.test(text)) return true;
+  if (/\b(item|order)\b/.test(text) && !/\b(category|status|type)\b/.test(text)) return true;
+  return false;
+}
+
+function normalizeHeaderText(header) {
+  return String(header || "").trim().toLowerCase();
 }
 
 export default App;

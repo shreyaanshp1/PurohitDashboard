@@ -158,12 +158,12 @@ export const costcoAccountDetailGroups = [
 const usMintAccountsTsv = `Account Nickname	Owner	Email	US Mint Account #	Shipping Name	Phone	Address	Primary Card	Card Exp	Status	Notes
 Praful	Praful	praful.chawlikar@stylemeetsprice.com	USM06611452	Santosh Purohit	469-710-1065	16709C Garden Dr, Celina, TX 75009-2057	Amex 1004	10/2029	Active	Cards cleaned; only Amex 1004 remains.
 Santosh Hotmail	Santosh	santosh.purohit@hotmail.com	USM03822408	Santosh Purohit	508-826-9529	16709E Garden Dr, Celina, TX 75009-2057	Amex 3007	08/2028	Active	Address updated from #B to 16709E Garden Dr.
-Santosh Gmail	Santosh	purohit.santosh@gmail.com	USM04529494	Santosh Purohit	267-370-2303	16709A Garden Dr, Celina, TX 75009-2057	Amex 1009	09/2027	Active	Several subscriptions paused.
+Santosh Personal	Santosh	purohit.santosh@gmail.com	USM04529494	Santosh Purohit	267-370-2303	16709A Garden Dr, Celina, TX 75009-2057	Amex 1009	09/2027	Active	Several subscriptions paused.
 Prakash	Prakash	prakashbadugu@stylemeetsprice.com	USM06558649	Shreyaansh Purohit	469-715-1064	16709B Garden Dr, Celina, TX 75009-2057	Amex 1007	04/2029	Active	High-volume silver dollar subscriptions.
 Rajat	Rajat	rajatmukherjee@stylemeetsprice.com	USM06558550	Santoshh Purohit	469-715-1063	16709D Garden Dr, Celina, TX 75009-2057	Amex 1003	05/2029	Active	Address changed from 16709C to 16709D.
 Santosh iCloud	Santosh	santoshpurohit@icloud.com	USM04529480	Santosh Purohit	469-547-7217	16501 Amistad Ave, Prosper, TX 75078-0330	Amex 2002	02/2029	Active	Card added after initial missing payment details.
 Sasmita iCloud	Sasmita	sasmita.adhikari@icloud.com	USM03822911	Sasmita Adhikari	469-715-1066	6029 Attucks Dr, Krugerville, TX 76227-6013	Amex 2004	04/2030	Active	Card changed from Amex 1004 to Amex 2004. PayPal may still be linked.
-Shreyaansh Gmail	Shreyaansh	shreyaanshpurohit@gmail.com	USM04528343	Santosh Purohit	469-715-1054	101 Main St, Ste 11, Weston, TX 75097-9701	Amex 1005	05/2029	Active	Only Congratulations Set active; reverse proof set paused.`;
+Shreyaansh Personal	Shreyaansh	shreyaanshpurohit@gmail.com	USM04528343	Santosh Purohit	469-715-1054	101 Main St, Ste 11, Weston, TX 75097-9701	Amex 1005	05/2029	Active	Only Congratulations Set active; reverse proof set paused.`;
 
 function parseUsMintAccountRows(text) {
   const [headerLine, ...lines] = text.trim().split(/\r?\n/);
@@ -340,8 +340,6 @@ export const costco = {
   ]
 };
 
-export const costcoManualPulls = [];
-
 function buildRenewalReminder(account) {
   const renewalDate = parseUsDate(account.renewalOpens) || parseUsDate(account.expirationDate);
   const expirationDate = parseUsDate(account.expirationDate);
@@ -499,12 +497,12 @@ export const reports = [
 ];
 
 export const syncSettings = [
-  { source: "Google Sheets Costco", query: "Accounts, Orders, Rewards, Renewals tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
-  { source: "Google Sheets US Mint", query: "Accounts, Orders, Release Calendar, Subscriptions tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
-  { source: "Google Sheets Travel", query: "Trips, Flights, Certificates_Awards tabs", status: "Connected through service account", cadence: "Refresh and log rows" },
-  { source: "Google Sheets Dell", query: "Accounts, Orders, Items, Rewards, Fulfillment, Sales tabs", status: "Spreadsheet ID ready", cadence: "Refresh and log rows" },
-  { source: "Google Sheets Ops", query: "Buyers, rewards, alerts, reports, and inventory tabs", status: "Spreadsheet IDs ready", cadence: "Refresh and log rows" },
-  { source: "Gmail OAuth", query: "Optional Costco and US Mint email import", status: "Can be disabled in Settings", cadence: "Manual only" }
+  {
+    source: "Costco Tracker Workbook",
+    query: "Account Information, Transactions, Rewards Tracker, Category Summary",
+    status: "Connected through service account",
+    cadence: "Refresh and log rows"
+  }
 ];
 
 export const alertRules = [

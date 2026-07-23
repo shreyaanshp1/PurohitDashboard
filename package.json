@@ -9,7 +9,7 @@
     "dev:api": "node server/purchaseLoggerServer.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:parser": "node --test src/services/*.test.js"
+    "test": "node --test src/services/*.test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.1",

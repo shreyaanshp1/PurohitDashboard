@@ -22,20 +22,8 @@ jobs:
       - name: Setup Supabase CLI
         run: npm install -g supabase@latest
 
-      - name: Deploy travel sheets function
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: supabase functions deploy travel-sheets --project-ref "$SUPABASE_PROJECT_REF" --use-api
-
       - name: Deploy auth function
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: supabase functions deploy auth --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt
-
-      - name: Deploy travel master data function
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: supabase functions deploy travel-master-data --project-ref "$SUPABASE_PROJECT_REF" --use-api

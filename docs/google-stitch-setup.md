@@ -13,8 +13,7 @@ Use Stitch as a design accelerator for this dashboard, not as the source of trut
    - Data-first interface, not a marketing site.
    - Left sidebar navigation.
    - Dense but readable tables, compact cards, 8px radius, restrained colors, clear status badges.
-   - Google Sheets is the primary operational data source.
-   - Gmail OAuth is optional and can be disabled.
+   - The Costco tracker workbook is the only live Google Sheets data source.
 
 ## 2. Add A Design Source Of Truth
 
@@ -69,15 +68,14 @@ Use prompts like:
 ```txt
 Design the Settings screen for Santosh Portfolio Command Center.
 Follow the design system exactly.
-Show global connection controls, including a toggle to disable Google OAuth.
-Show Google Sheets source rows for Costco, US Mint, Travel, Dell, Commodities, Buyers, Rewards, Alerts, and Reports.
+Show the Costco tracker workbook connection and local/static rows for the other sections.
 Keep the UI dense, professional, and table-first.
 ```
 
 ```txt
 Design a Google Sheets-connected Costco dashboard tab.
 Include a compact toolbar with connection status, refresh, and Log Row.
-Below it, show spreadsheet tabs for Accounts, Orders, Rewards, and Renewals.
+Below it, show spreadsheet tabs for Account Information, Transactions, Rewards Tracker, and Category Summary.
 Use a data table with sortable headers and status pills.
 ```
 
@@ -115,5 +113,5 @@ When Stitch gives you a design:
 - Keep dashboard pages data-first.
 - Confirm text fits on mobile.
 - Verify with `npm run build`.
-- Verify parser tests with `npm run test:parser`.
+- Verify service tests with `npm run test`.
 - Audit that no secret file is under `src/`.

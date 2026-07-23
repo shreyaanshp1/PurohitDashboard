@@ -1,11 +1,9 @@
 const CONFIGURED_PURCHASE_ENDPOINT = import.meta.env?.VITE_PURCHASE_LOG_ENDPOINT || "";
 const PURCHASE_ENDPOINT = CONFIGURED_PURCHASE_ENDPOINT || "/api/purchases";
 const API_ROOT = PURCHASE_ENDPOINT.replace(/\/purchases\/?$/, "") || "/api";
-const TRAVEL_SHEETS_ENDPOINT = trimTrailingSlash(import.meta.env?.VITE_TRAVEL_SHEETS_ENDPOINT || "");
-const TRAVEL_MASTER_DATA_ENDPOINT = import.meta.env?.VITE_TRAVEL_MASTER_DATA_ENDPOINT || "";
 const IS_GITHUB_PAGES = typeof window !== "undefined" && window.location.hostname.endsWith("github.io");
 const HAS_PURCHASE_BACKEND = Boolean(CONFIGURED_PURCHASE_ENDPOINT || !IS_GITHUB_PAGES);
-const GMAIL_BACKEND_UNCONFIGURED_MESSAGE = "Gmail import backend is not configured for this GitHub Pages deployment.";
+const BACKEND_UNCONFIGURED_MESSAGE = "Private API backend is not configured for this deployment.";
 
 export async function appendPurchase(purchase) {
   return postJson(`${API_ROOT}/purchases`, { purchase });
@@ -42,90 +40,6 @@ export async function uploadReceiptFile(file) {
       fileName: file.name
     }
   });
-}
-
-export async function getGoogleOAuthStatus() {
-  if (!HAS_PURCHASE_BACKEND) {
-    return {
-      authenticated: false,
-      configured: false,
-      unavailableReason: GMAIL_BACKEND_UNCONFIGURED_MESSAGE
-    };
-  }
-
-  return requestJson(`${API_ROOT}/google/oauth/status`);
-}
-
-export async function getGoogleOAuthUrl({ returnUrl = "" } = {}) {
-  requirePurchaseBackend("Google OAuth");
-
-  const params = new URLSearchParams();
-
-  if (returnUrl) {
-    params.set("returnUrl", returnUrl);
-  }
-
-  return requestJson(`${API_ROOT}/google/oauth/url${params.size ? `?${params}` : ""}`);
-}
-
-export async function listCostcoOrders({ limit = 500 } = {}) {
-  if (!HAS_PURCHASE_BACKEND) {
-    return { orders: [], success: true };
-  }
-
-  return requestJson(`${API_ROOT}/costco-orders?${new URLSearchParams({ limit: String(limit) })}`);
-}
-
-export async function importCostcoOrders({ limit = 500, query = "", limitPerBatch = "", historyStartYear = "", historyEndYear = "" } = {}) {
-  requirePurchaseBackend("Costco Gmail import");
-  return postJson(`${API_ROOT}/costco-orders/import`, { limit, query, limitPerBatch, historyStartYear, historyEndYear });
-}
-
-export async function clearCostcoOrders() {
-  requirePurchaseBackend("Costco Gmail import");
-  return postJson(`${API_ROOT}/costco-orders/clear`, {});
-}
-
-export async function listUsMintOrders({ limit = 500 } = {}) {
-  if (!HAS_PURCHASE_BACKEND) {
-    return { orders: [], success: true };
-  }
-
-  return requestJson(`${API_ROOT}/us-mint-orders?${new URLSearchParams({ limit: String(limit) })}`);
-}
-
-export async function importUsMintOrders({ limit = 500, query = "", limitPerBatch = "", historyStartYear = "", historyEndYear = "" } = {}) {
-  requirePurchaseBackend("US Mint Gmail import");
-  return postJson(`${API_ROOT}/us-mint-orders/import`, { limit, query, limitPerBatch, historyStartYear, historyEndYear });
-}
-
-export async function clearUsMintOrders() {
-  requirePurchaseBackend("US Mint Gmail import");
-  return postJson(`${API_ROOT}/us-mint-orders/clear`, {});
-}
-
-export async function listTravelSheets() {
-  if (TRAVEL_SHEETS_ENDPOINT) {
-    return requestJson(TRAVEL_SHEETS_ENDPOINT);
-  }
-
-  return requestJson(`${API_ROOT}/travel/sheets`);
-}
-
-export async function listTravelMasterData() {
-  if (TRAVEL_MASTER_DATA_ENDPOINT) {
-    return requestJson(TRAVEL_MASTER_DATA_ENDPOINT);
-  }
-
-  return requestJson(`${API_ROOT}/travel/master-data`);
-}
-
-export async function appendTravelSheetRow({ sheetName, values }) {
-  if (TRAVEL_SHEETS_ENDPOINT) {
-    return postJson(`${TRAVEL_SHEETS_ENDPOINT}/${encodeURIComponent(sheetName)}/rows`, { values });
-  }
-
-  return postJson(`${API_ROOT}/travel/sheets/${encodeURIComponent(sheetName)}/rows`, { values });
 }
 
 export async function listSpreadsheetSource(source) {
@@ -195,14 +109,10 @@ function parseJsonResponse(text, response) {
   }
 }
 
-function trimTrailingSlash(value) {
-  return String(value || "").trim().replace(/\/$/, "");
-}
-
 function requirePurchaseBackend(feature) {
   if (HAS_PURCHASE_BACKEND) return;
 
-  throw new Error(`${feature} is unavailable. ${GMAIL_BACKEND_UNCONFIGURED_MESSAGE}`);
+  throw new Error(`${feature} is unavailable. ${BACKEND_UNCONFIGURED_MESSAGE}`);
 }
 
 function readFileAsDataUrl(file) {

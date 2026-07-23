@@ -1,53 +1,17 @@
 import { appendRowToSheet, getSheetValues, updateRowInSheet } from "./sheetsClient.mjs";
 
 const sourceConfigs = {
-  alerts: {
-    defaultSheetNames: ["Alerts"],
-    label: "Alerts",
-    sheetNamesEnv: "ALERTS_SHEET_NAMES",
-    spreadsheetIdEnv: "ALERTS_SPREADSHEET_ID"
-  },
-  buyers: {
-    defaultSheetNames: ["Buyers"],
-    label: "Buyers",
-    sheetNamesEnv: "BUYERS_SHEET_NAMES",
-    spreadsheetIdEnv: "BUYERS_SPREADSHEET_ID"
-  },
-  commodities: {
-    defaultSheetNames: ["Inventory", "Sales"],
-    label: "Commodities",
-    sheetNamesEnv: "COMMODITIES_SHEET_NAMES",
-    spreadsheetIdEnv: "COMMODITIES_SPREADSHEET_ID"
-  },
   costco: {
-    defaultSheetNames: ["Accounts", "Transactions", "Orders", "Rewards", "Renewals"],
+    defaultSheetNames: ["Account Information", "Transactions", "Rewards Tracker", "Category Summary"],
+    defaultSpreadsheetId: "1ChrRfDNyj2h9JC0QzLySVkvXKQzhZjo_5ZutgW063x0",
+    headerRows: {
+      "Account Information": 2,
+      "Rewards Tracker": 3,
+      "Category Summary": 3
+    },
     label: "Costco",
     sheetNamesEnv: "COSTCO_SHEET_NAMES",
     spreadsheetIdEnv: "COSTCO_SPREADSHEET_ID"
-  },
-  dell: {
-    defaultSheetNames: ["Accounts", "Orders", "Items", "Rewards", "Fulfillment", "Sales"],
-    label: "Dell",
-    sheetNamesEnv: "DELL_SHEET_NAMES",
-    spreadsheetIdEnv: "DELL_SPREADSHEET_ID"
-  },
-  reports: {
-    defaultSheetNames: ["Reports"],
-    label: "Reports",
-    sheetNamesEnv: "REPORTS_SHEET_NAMES",
-    spreadsheetIdEnv: "REPORTS_SPREADSHEET_ID"
-  },
-  rewards: {
-    defaultSheetNames: ["Rewards"],
-    label: "Rewards",
-    sheetNamesEnv: "REWARDS_SHEET_NAMES",
-    spreadsheetIdEnv: "REWARDS_SPREADSHEET_ID"
-  },
-  usMint: {
-    defaultSheetNames: ["Accounts", "Orders", "Release Calendar", "Subscriptions", "Expected Charges", "Buyer Sales"],
-    label: "US Mint",
-    sheetNamesEnv: "US_MINT_SHEET_NAMES",
-    spreadsheetIdEnv: "US_MINT_SPREADSHEET_ID"
   }
 };
 
@@ -66,7 +30,7 @@ export async function listSpreadsheetSource(sourceId) {
     };
   }
 
-  const sheets = await Promise.all(sheetNames(config).map((sheetName) => readSheet({ sheetName, spreadsheetId })));
+  const sheets = await Promise.all(sheetNames(config).map((sheetName) => readSheet({ config, sheetName, spreadsheetId })));
 
   return {
     configured: true,
@@ -91,7 +55,7 @@ export async function appendSpreadsheetSourceRow({ sourceId, sheetName, values }
     throw statusError("Sheet name is required.", 400);
   }
 
-  const currentSheet = await readSheet({ sheetName: normalizedSheetName, spreadsheetId });
+  const currentSheet = await readSheet({ config, sheetName: normalizedSheetName, spreadsheetId });
   const headers = currentSheet.headers.filter(Boolean);
   if (!headers.length) {
     throw statusError(`${normalizedSheetName} needs a header row before rows can be appended.`, 400);
@@ -101,7 +65,7 @@ export async function appendSpreadsheetSourceRow({ sourceId, sheetName, values }
   await appendRowToSheet({ spreadsheetId, sheetName: normalizedSheetName, values: rowValues });
 
   return {
-    row: objectFromRow(headers, rowValues, currentSheet.rows.length),
+    row: objectFromRow(headers, rowValues, currentSheet.nextRowNumber),
     sheetName: normalizedSheetName,
     source: sourceId,
     success: true
@@ -126,7 +90,7 @@ export async function updateSpreadsheetSourceRow({ rowNumber, sourceId, sheetNam
     throw statusError("A valid spreadsheet row number is required.", 400);
   }
 
-  const currentSheet = await readSheet({ sheetName: normalizedSheetName, spreadsheetId });
+  const currentSheet = await readSheet({ config, sheetName: normalizedSheetName, spreadsheetId });
   const headers = currentSheet.headers.filter(Boolean);
   if (!headers.length) {
     throw statusError(`${normalizedSheetName} needs a header row before rows can be updated.`, 400);
@@ -154,7 +118,7 @@ function sourceConfig(sourceId) {
 }
 
 function configuredSpreadsheetId(config) {
-  return normalizeSpreadsheetId(process.env[config.spreadsheetIdEnv] || "");
+  return normalizeSpreadsheetId(process.env[config.spreadsheetIdEnv] || config.defaultSpreadsheetId || "");
 }
 
 function sheetNames(config) {
@@ -166,39 +130,67 @@ function sheetNames(config) {
   return names.length ? names : config.defaultSheetNames;
 }
 
-async function readSheet({ spreadsheetId, sheetName }) {
+async function readSheet({ config, spreadsheetId, sheetName }) {
   try {
     const values = await getSheetValues({ spreadsheetId, sheetName });
-    const headers = (values[0] || []).map((value) => String(value || "").trim()).filter(Boolean);
-    const rows = values
-      .slice(1)
-      .map((row, index) => objectFromRow(headers, row, index))
-      .filter((row) => Object.entries(row).some(([key, value]) => key !== "id" && String(value || "").trim()));
+    const headerRowNumber = headerRowNumberForSheet(config, sheetName, values);
+    const headerRowIndex = Math.max(headerRowNumber - 1, 0);
+    const headers = (values[headerRowIndex] || []).map((value) => String(value || "").trim()).filter(Boolean);
+    let lastRowNumber = headerRowNumber;
+    const rows = values.slice(headerRowIndex + 1).reduce((records, row, index) => {
+      const rowNumber = headerRowNumber + index + 1;
+      const record = objectFromRow(headers, row, rowNumber);
+      const hasValues = Object.entries(record).some(([key, value]) => key !== "id" && String(value || "").trim());
+      if (!hasValues) return records;
+
+      lastRowNumber = rowNumber;
+      records.push(record);
+      return records;
+    }, []);
 
     return {
       error: "",
+      headerRowNumber,
       headers,
       name: sheetName,
+      nextRowNumber: lastRowNumber + 1,
       rowCount: rows.length,
       rows
     };
   } catch (error) {
     return {
       error: error.message,
+      headerRowNumber: 1,
       headers: [],
       name: sheetName,
+      nextRowNumber: 2,
       rowCount: 0,
       rows: []
     };
   }
 }
 
-function objectFromRow(headers, row, index) {
+function objectFromRow(headers, row, rowNumber) {
   const record = Object.fromEntries(headers.map((header, headerIndex) => [header, row?.[headerIndex] ?? ""]));
   return {
-    id: `${index + 2}`,
+    id: `${rowNumber}`,
     ...record
   };
+}
+
+function headerRowNumberForSheet(config, sheetName, values) {
+  const configured = Number(config?.headerRows?.[sheetName]);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  return detectHeaderRowNumber(values);
+}
+
+function detectHeaderRowNumber(values) {
+  const inspectedRows = values.slice(0, 10);
+  const firstPlausibleHeader = inspectedRows.findIndex(
+    (row) => (row || []).filter((value) => String(value || "").trim()).length >= 2
+  );
+
+  return (firstPlausibleHeader === -1 ? 0 : firstPlausibleHeader) + 1;
 }
 
 function normalizeSpreadsheetId(value) {

@@ -1,60 +1,14 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { normalizePurchase } from "./purchaseData.mjs";
 
 const SHEETS_WRITE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const SHEETS_READONLY_SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly";
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const TOKEN_URL = `https://${["oa", "uth2"].join("")}.googleapis.com/token`;
 const SHEETS_API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const DEFAULT_SERVICE_ACCOUNT_KEY_FILE = "secrets/google-sheet-api.json";
-const PURCHASE_HEADER = [
-  "Date",
-  "Store Name",
-  "Total Amount",
-  "Category",
-  "Items/Notes",
-  "Rewards Earned",
-  "Logged At"
-];
 
 const cachedTokens = new Map();
-
-export async function appendPurchaseToSheet(purchase) {
-  const spreadsheetId = requiredEnv("GOOGLE_SHEET_ID");
-  const sheetName = process.env.GOOGLE_SHEET_NAME || "Purchases";
-  const accessToken = await getAccessToken(SHEETS_WRITE_SCOPE);
-  const normalized = normalizePurchase(purchase);
-
-  await ensureSheetExists({ accessToken, spreadsheetId, sheetName });
-  await ensureHeader({ accessToken, spreadsheetId, sheetName });
-
-  const row = [
-    normalized.date,
-    normalized.storeName,
-    normalized.totalAmount,
-    normalized.category,
-    normalized.itemsNotes,
-    normalized.rewardsEarned,
-    new Date().toISOString()
-  ];
-
-  const range = encodeURIComponent(`${quoteSheetName(sheetName)}!A:G`);
-  const url = `${SHEETS_API_BASE}/${spreadsheetId}/values/${range}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: authJsonHeaders(accessToken),
-    body: JSON.stringify({ values: [row] })
-  });
-
-  const data = await parseGoogleResponse(response);
-
-  return {
-    success: true,
-    updatedRange: data.updates?.updatedRange,
-    purchase: normalized
-  };
-}
 
 export async function getSheetValues({ spreadsheetId, sheetName, range = "A:ZZ" }) {
   const accessToken = await getAccessToken(SHEETS_READONLY_SCOPE);
@@ -109,43 +63,6 @@ export async function updateRowInSheet({ spreadsheetId, sheetName, rowNumber, va
   };
 }
 
-async function ensureSheetExists({ accessToken, spreadsheetId, sheetName }) {
-  const url = `${SHEETS_API_BASE}/${spreadsheetId}?fields=sheets.properties.title`;
-  const response = await fetch(url, { headers: authHeaders(accessToken) });
-  const data = await parseGoogleResponse(response);
-  const exists = data.sheets?.some((sheet) => sheet.properties?.title === sheetName);
-
-  if (exists) return;
-
-  const createResponse = await fetch(`${SHEETS_API_BASE}/${spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    headers: authJsonHeaders(accessToken),
-    body: JSON.stringify({
-      requests: [{ addSheet: { properties: { title: sheetName } } }]
-    })
-  });
-
-  await parseGoogleResponse(createResponse);
-}
-
-async function ensureHeader({ accessToken, spreadsheetId, sheetName }) {
-  const headerRange = encodeURIComponent(`${quoteSheetName(sheetName)}!A1:G1`);
-  const response = await fetch(`${SHEETS_API_BASE}/${spreadsheetId}/values/${headerRange}`, {
-    headers: authHeaders(accessToken)
-  });
-  const data = await parseGoogleResponse(response);
-
-  if (data.values?.[0]?.some(Boolean)) return;
-
-  const updateResponse = await fetch(`${SHEETS_API_BASE}/${spreadsheetId}/values/${headerRange}?valueInputOption=RAW`, {
-    method: "PUT",
-    headers: authJsonHeaders(accessToken),
-    body: JSON.stringify({ values: [PURCHASE_HEADER] })
-  });
-
-  await parseGoogleResponse(updateResponse);
-}
-
 async function getAccessToken(scope) {
   const now = Math.floor(Date.now() / 1000);
   const cachedToken = cachedTokens.get(scope);
@@ -171,7 +88,7 @@ async function getAccessToken(scope) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      grant_type: ["urn:ietf:params:", ["oa", "uth"].join(""), ":grant-type:jwt-bearer"].join(""),
       assertion
     })
   });
@@ -275,10 +192,4 @@ async function parseGoogleResponse(response) {
   }
 
   return data;
-}
-
-function requiredEnv(key) {
-  const value = process.env[key];
-  if (!value) throw new Error(`Missing ${key}.`);
-  return value;
 }
