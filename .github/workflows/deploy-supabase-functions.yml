@@ -26,4 +26,25 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: supabase functions deploy auth --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          ADMIN_DASHBOARD_PASSWORD: ${{ secrets.ADMIN_DASHBOARD_PASSWORD }}
+          ADMIN_DASHBOARD_NAME: ${{ vars.ADMIN_DASHBOARD_NAME }}
+        run: |
+          if [ -z "$SUPABASE_PROJECT_REF" ] && [ -n "$SUPABASE_URL" ]; then
+            export SUPABASE_PROJECT_REF="$(echo "$SUPABASE_URL" | sed -E 's#https://([^.]+)\\.supabase\\.co.*#\\1#')"
+          fi
+
+          if [ -z "$SUPABASE_PROJECT_REF" ]; then
+            echo "SUPABASE_PROJECT_REF is not configured."
+            exit 1
+          fi
+
+          if [ -n "$ADMIN_DASHBOARD_PASSWORD" ]; then
+            supabase secrets set ADMIN_DASHBOARD_PASSWORD="$ADMIN_DASHBOARD_PASSWORD" --project-ref "$SUPABASE_PROJECT_REF"
+          fi
+
+          if [ -n "$ADMIN_DASHBOARD_NAME" ]; then
+            supabase secrets set ADMIN_DASHBOARD_NAME="$ADMIN_DASHBOARD_NAME" --project-ref "$SUPABASE_PROJECT_REF"
+          fi
+
+          supabase functions deploy auth --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt
