@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
+import { loadEnvFiles } from "./serverEnv.mjs";
 
 export function authenticateDashboardPassword({ password }) {
+  loadEnvFiles();
+
   const configuredPassword = String(process.env.ADMIN_DASHBOARD_PASSWORD || "");
   const submittedPassword = String(password || "");
 

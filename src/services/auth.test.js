@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { authenticateDashboardPassword } from "../../server/authService.mjs";
 import { hashPassword, generateTwoFactorCode, signInWithSupabase, signUpWithSupabase, unlockDashboardWithPassword, verifyTwoFactorCode } from "./auth.js";
 
 test("hashPassword returns a stable digest for the same password", () => {
@@ -75,6 +79,31 @@ test("dashboard password rejects auth API failures", async () => {
       globalThis.fetch = previousFetch;
     }
   });
+});
+
+test("dashboard password is read from the local env file when the server is already running", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dashboard-auth-"));
+  const previousCwd = process.cwd();
+  const previousPassword = process.env.ADMIN_DASHBOARD_PASSWORD;
+  delete process.env.ADMIN_DASHBOARD_PASSWORD;
+
+  try {
+    process.chdir(tempDir);
+    fs.writeFileSync(path.join(tempDir, ".env.local"), "ADMIN_DASHBOARD_PASSWORD=from-env-file\n");
+
+    const result = authenticateDashboardPassword({ password: "from-env-file" });
+
+    assert.equal(result.success, true);
+    assert.equal(result.session.username, "dashboard-admin");
+  } finally {
+    process.chdir(previousCwd);
+    if (previousPassword === undefined) {
+      delete process.env.ADMIN_DASHBOARD_PASSWORD;
+    } else {
+      process.env.ADMIN_DASHBOARD_PASSWORD = previousPassword;
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("legacy username auth and signup are disabled", async () => {
